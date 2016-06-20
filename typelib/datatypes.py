@@ -240,6 +240,19 @@ class SetTypeData(object):
     def resolve_field_from_path(self, thetype, field_path):
         return self.value_type.resolve_field_from_path(field_path)
 
+class ParametricTypeData(object):
+    def __init__(self, type_name, *param_names_and_types):
+        self.type_name = type_name
+        self.param_names = [n for n,v in param_names_and_types]
+        self.param_types = [v for n,v in param_names_and_types]
+
+    def signature(self, thetype):
+        param_types = [t.to_json(visited = visited) for t in self.param_types]
+        return "%s[ %s ]" % (self.type_name, ",".join(param_types))
+
+    def to_json(self, thetype, visited = none):
+        return {"type": self.type_name, "params": dict(izip(self.param_names, self.param_types))}
+
 class ListTypeData(object):
     def __init__(self, value_type):
         self.value_type = value_type
@@ -247,7 +260,7 @@ class ListTypeData(object):
     def signature(self, thetype):
         return "[ %s ]" % (self.value_type.signature)
 
-    def to_json(self, thetype, visited = None):
+    def to_json(self, thetype, visited = none):
         return {"type": "array", "items": self.value_type.to_json(visited = visited)}
 
     def resolve_field_from_path(self, thetype, field_path):
