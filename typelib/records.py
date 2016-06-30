@@ -1,6 +1,53 @@
 
-import datatypes
+import utils
+import errors
+import core
 import ipdb
+
+def RecordType(record_data = None):
+    record_data = record_data or Record()
+    return core.Type("record", record_data)
+
+class Record(object):
+    def __init__(self):
+        self.resolved = True
+        self.field_declarations = []
+        self.source_records = []
+
+    def add_field_declaration(self, field_decl):
+        """
+        Add a field declaration.
+        """
+        self.resolved = False
+        self.field_declarations.append(field_decl)
+        # TODO: see if this field declaration can be resolved.
+
+    def add_source_record(self, source_record, alias = None):
+        """
+        Add a new source record that this record derives from.
+        """
+        n,ns,fqn = utils.normalize_name_and_ns(source_record)
+        alias = alias or n
+        if self.find_source(alias) is not None:
+            raise TLException("A source by name '%s' already exists" % n)
+        self.source_records.append((source_record, alias))
+
+    def find_source(self, name):
+        """
+        Find a source by a given name.
+        """
+        for (rec,alias) in self.source_records:
+            if name == alias:
+                return rec
+        return None
+
+    @property
+    def has_sources(self):
+        return self.source_count > 0
+
+    @property
+    def source_count(self):
+        return len(self.source_records)
 
 class FieldDeclaration(object):
     """
@@ -172,13 +219,13 @@ class FieldPath(object):
 
             if parent_type.is_list_type:
                 calc_type_at_x(x, parent_type.type_data.value_type)
-                curr_comp._final_type = datatypes.ListType(curr_comp._final_type)
+                curr_comp._final_type = core.ListType(curr_comp._final_type)
             elif parent_type.is_set_type:
                 calc_type_at_x(x, parent_type.type_data.value_type)
-                curr_comp._final_type = datatypes.SetType(curr_comp._final_type)
+                curr_comp._final_type = core.SetType(curr_comp._final_type)
             elif parent_type.is_map_type:
                 calc_type_at_x(x, parent_type.type_data.value_type)
-                curr_comp._final_type = datatypes.MapType(parnet_type.key_type, curr_comp._final_type)
+                curr_comp._final_type = core.MapType(parnet_type.key_type, curr_comp._final_type)
             else: # elif parent_type.is_record_type:
                 # MUST be record type otherwise we cannot be indexing further
                 try:

@@ -40,6 +40,14 @@ class Type(object):
         self.type_args = list(type_args)
         self.type_data = type_data
         self.docs = ""
+        self._resolved = constructor not in ["", None]
+
+    @property
+    def is_resolved(self):
+        return self._resolved
+
+    def set_resolved(self, value):
+        self._resolved = value
 
     def copy_from(self, another):
         self.constructor = constructor
@@ -83,10 +91,4 @@ def SetType(value_type):
 
 def MapType(key_type, value_type):
     return Type("map", None, key_type, value_type)
-
-def RecordType(record_data):
-    return Type("record", record_data)
-
-def EnumType(enum_data):
-    return Type("enum", list(enum_symbols))
 

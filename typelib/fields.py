@@ -1,5 +1,5 @@
 
-import datatypes
+import core
 import ipdb
 
 class Field(object):
@@ -8,7 +8,7 @@ class Field(object):
     """
     def __init__(self, name, field_type, record, optional = False, default = None, docs = "", annotations = None):
         assert type(name) in (str, unicode)
-        assert isinstance(field_type, datatypes.Type), type(field_type)
+        assert isinstance(field_type, core.Type), type(field_type)
         assert record.is_record_type, "record parameter must be a RecordType, instead found: %s" % str(type(record))
         self.name = name or ""
         self.field_type = field_type

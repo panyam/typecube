@@ -2,7 +2,8 @@
 import os
 import ipdb
 import json
-import datatypes, fields
+import core
+import fields
 import utils
 import errors
 
@@ -15,16 +16,10 @@ class TypeRegistry(object):
     """
     def __init__(self):
         self.type_cache = {}
+        self.type_annotations = {}
+        self.type_docstrings = {}
         self._resolution_handlers = []
         self._unresolved_types = set()
-
-        # register default types
-        self.register_type(datatypes.IntType)
-        self.register_type(datatypes.LongType)
-        self.register_type(datatypes.FloatType)
-        self.register_type(datatypes.DoubleType)
-        self.register_type(datatypes.BooleanType)
-        self.register_type(datatypes.StringType)
 
     def has_type(self, fqn):
         """
@@ -45,7 +40,7 @@ class TypeRegistry(object):
         else:
             return self.type_cache[fqn]
 
-    def register_type(self, newtype):
+    def register_type(self, name, newtype, annotations = None, docstring = ""):
         """
         Register's a new type into the registry.  The type can be Unresolved
         if need be.  If a type already exists and is a resolved type, then 
@@ -56,15 +51,26 @@ class TypeRegistry(object):
             True if type was successfully registered
             False if a type with the given fqn already exists.
         """
-        if newtype.fqn in self.type_cache:
+
+        if name in self.type_cache:
             # ensure current one is unresolved otherwise throw an error
-            if self.type_cache[newtype.fqn].is_resolved:
-                raise errors.DuplicateTypeException(newtype.fqn)
+            if self.type_cache[name].is_resolved:
+                raise errors.DuplicateTypeException(name)
+            elif newtype is not None:
+                self.type_cache[name].copy_from(newtype)
             else:
-                self.type_cache[newtype.fqn].copy_from(newtype)
+                # Do nothing when current type is unresolved and newtype is None
+                # we wanted to create an unresolved type at this point anyway
+                pass
         else:
-            self.type_cache[newtype.fqn] = newtype
-        return self.type_cache[newtype.fqn]
+            if newtype is not None:
+                self.type_cache[name] = newtype
+            else:
+                self.type_cache[name] = core.Type(None)
+                self.type_cache[name].set_resolved(False)
+        self.type_annotations[name] = annotations or []
+        self.type_docstrings[name] = docstring
+        return self.type_cache[name]
 
     def resolve_type(self, atype):
         """
