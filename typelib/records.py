@@ -9,36 +9,65 @@ def RecordType(record_data = None):
     return core.Type("record", record_data)
 
 class Record(object):
-    def __init__(self):
+    class SourceRecordRef(object):
+        def __init__(self, record_fqn, record_type, alias):
+            self.record_fqn = record_fqn
+            self.alias = alias
+            self.record_type = record_type
+
+    def __init__(self, enclosing_projection = None, field_projections = None):
+        """Creates a new Record declaration.
+        Arguments:
+        enclosing_projection    --  The projection in which the record is being defined (either as a record mutation or as a brand new record).  
+                                    If this is not provided then this record is being defined independantly at the top level.
+        field_projections       --  List of projections that describe field declarations.
+        """
+        self.enclosing_projection = enclosing_projection
+        self.field_projections = field_projections or []
         self.resolved = True
-        self.field_declarations = []
+        self.fields = {}
         self.source_records = []
 
-    def add_field_declaration(self, field_decl):
+    @property
+    def root_record(self):
+        if self.enclosing_projection is None:
+            return self
+        return self.enclosing_projection.parent_record.root_record
+
+    @property 
+    def is_resolved(self):
+        return self._resolved
+
+    def add_field(self, field):
+        if field.name in self.fields:
+            raise errors.DuplicateFieldException(field.name)
+        self.fields[field.name] = field
+
+    def add_projection(self, projection):
         """
-        Add a field declaration.
+        Add a projection.
         """
-        self.resolved = False
-        self.field_declarations.append(field_decl)
+        self._resolved = False
+        self.projections.append(projection)
         # TODO: see if this field declaration can be resolved.
 
-    def add_source_record(self, source_record, alias = None):
+    def add_source_record(self, source_fqn, source_type, alias = None):
         """
         Add a new source record that this record derives from.
         """
-        n,ns,fqn = utils.normalize_name_and_ns(source_record)
+        n,ns,fqn = utils.normalize_name_and_ns(source_fqn)
         alias = alias or n
         if self.find_source(alias) is not None:
             raise TLException("A source by name '%s' already exists" % n)
-        self.source_records.append((source_record, alias))
+        self.source_records.append(Record.SourceRecordRef(source_fqn, source_type, alias))
 
     def find_source(self, name):
         """
         Find a source by a given name.
         """
-        for (rec,alias) in self.source_records:
-            if name == alias:
-                return rec
+        for source_rec_ref in self.source_records:
+            if source_rec_ref.alias == alias:
+                return source_rec_ref.record_fqn
         return None
 
     @property
@@ -49,6 +78,109 @@ class Record(object):
     def source_count(self):
         return len(self.source_records)
 
+
+    def resolve(self, thetype, registry, resolver):
+        """
+        Tries to resolve all dependencies for this record.
+
+        Resolution does the following:
+
+            1. First check if registry has all the sources.  If any of the sources are missing 
+               an UnresolvedType exception is thrown.
+            2. 
+        """
+        # Step 1: Check if source records are resolved and if they are then throw unresolved types exception if sources are missing
+        unresolved_types = set()
+        for source_rec_ref in self.source_records:
+            if source_rec_ref.record_type is None or source_rec_ref.record_type.is_unresolved:
+                source_rec_type = registry.get_type(source_rec_ref.record_fqn)
+                if source_rec_type is None or source_rec_type.is_unresolved:
+                    unresolved_types.add(source_rec_ref.record_fqn)
+                else:
+                    source_rec_ref.record_type = source_rec_type
+
+        if len(unresolved_types) > 0:
+            raise errors.TypesNotFoundException(*list(unresolved_types))
+
+        # Step 2: Now go through declarations and resolve into fields
+        unresolved_types = set()
+        for proj in self.projections:
+            try:
+                proj.resolve(registry)
+            except errors.TypesNotFoundException, exc:
+                unresolved_types.add(exc.missing_types)
+
+        if len(unresolved_types) > 0:
+            raise errors.TypesNotFoundException(*list(unresolved_types))
+
+        # otherwise all of these are resolved so create our field list from these
+        self.fields = {}
+        for proj in self.projections:
+            for field in proj.resolved_fields:
+                self.add_field(field)
+        return True
+
+class Projection(object):
+    """
+    Projections are a way of declaring a dependencies between a fields.
+    """
+    def __init__(self, parent_record, source_field_path, target_type, target_name,
+            is_optional = None, default_value = None, selected_children = None,
+            annotations = None):
+        """Creates a projection.
+        Arguments:
+        parent_record       --  The parent record in which the projections are defined.
+        source_field_paths  --  The list of components denoting the field path.   If the first value is an empty 
+                                string, then the field path indicates an absolute path.
+        target_name         --  Specifies whether the field projected from the source path is to be renamed.  
+                                If None then the same name as the source field path is used.
+        target_type         --  Specifies whether the field is to be re-typed in the destination record.
+        is_optional         --  Whether the field is optional.  
+                                    If True/False field is optional or required.
+                                    If None then this value is derived from the source field.
+        default_value       --  Default value of the field.  If None, then the value is the default_value 
+                                of the source field.
+        selected_children   --  The list of child fields that are selected in a single sweep.  If this field is 
+                                specified then is_optional, default_value, target_name, and target_type are ignored 
+                                and MUST NOT be specified.  If this value is the string "*" then ALL children all
+                                selected.  When this is specified, the source field MUST be of a record type.
+        annotations         --  Any annotations that apply to this projection (common ones are type mappers).
+        """
+        self.source_field_path = source_field_path
+        self.target_type = target_type
+        self.target_name = target_name
+        self.is_optional = is_optional
+        self.default_value = default_value
+        self.selected_children = selected_children
+        self.annotations = annotations or []
+        self.inverted = False
+        self._resolved = False
+
+        if selected_children is not None:
+            assert target_type is None and \
+                   target_name is None and \
+                   is_optional is None and \
+                   default_value is None, \
+                   "When selected_children is specified, target_type, target_name, default_value and is_optional must all be None"
+
+        # Parameters that are inputs to type streaming.  If these 
+        self.stream_params = None
+
+        # TODO: should each projection also have a "param name"?   We could be referring to a record to 
+        # begin from, but we could also 
+
+        # How to do bindings?  A projection is really referring to a "field" or "param" outside its scope.
+        # How to bring in concept of scopes?   Should types themselves have parents?
+        # We can do it in a few ways, each projection or a type can point to its enclosing/parent type.
+        # and each projection, but then projections themselves must have a concept of parent records and
+        # records must have concepts of parent projections (ie the projection they are created in) so we
+        # can traverse up a chain if need be.  
+        self.bindings = None
+
+    @property
+    def resolved(self):
+        return self._resolved
+
 class FieldDeclaration(object):
     """
     Describes a field declaration.  The same declaration is used for both mutating an 
@@ -57,50 +189,8 @@ class FieldDeclaration(object):
     A Field declaration will be remain in an "unresolved" state until all its 
     dependant types are also provided.
     """
-    def __init__(self, source_record, field_path_parts,
+    def __init__(self, source_record, starting_record_type, field_path_parts,
                  starts_at_root = False, negates_inclusion = False, annotations = None):
-        # Source record in which the declaration is provided
-        self.source_record = source_record
-
-        # Field path string which refers to one or more fields within the
-        # source record.  Following are possible:
-        self.field_path_parts = field_path_parts
-
-        # Set to True after field path and source record resolution is complete
-        self.resolved = False
-
-        # Whether the field path starts at the root or at the "current"
-        # level
-        self.starts_at_root = starts_at_root
-
-        # Tells if we are adding or deleting fields
-        self.negates_inclusion = negates_inclusion
-
-        # Annotations on the field inclusion
-        self.annotations = annotations or []
-
-        # Whether the field is being renamed.
-        # This can ONLY be set if the field path string refers to a single field
-        # If multiple fields are referred to then this will throw an error when
-        # the source record type has been resolved.
-        self.declared_name = None
-
-        # The type as was declared for this field
-        self.declared_type = None
-
-        # Which of the fields are being selected?
-        # If this is None then "all" fields are being selected 
-        # (or negated depending on the negate_inclusions flags)
-        # otherwise it must be a list of field names which will be included 
-        # (or excluded depending on the negates_inclusions flag)
-        self.child_fields = True
-
-        # Marks whether a field's optionality is being changed
-        self.is_optional = False
-
-        # Marks whether a field's default value is being changed
-        self.default_value = None
-
         # How the retyping happens.   THis can happen in one of a few ways:
         self.type_stream = None
 
@@ -108,14 +198,29 @@ class FieldDeclaration(object):
     def all_fields_selected(self):
         return self.child_fields is None
 
-    def resolve(self, source_type):
+    def resolve(self, registry):
         """
-        Starting from the source_type resolve the type of this given field.
+        Starting from the source_record's source types resolve the type of this given field.
         """
-        if not self.resolved:
-            self.source_type = source_type
-            self.field_path = FieldPath(self.source_type, self.field_path_str)
-            self.resolved = True
+        if self.resolved:
+            return True
+
+        # How to find the source record given the first part in the field path parts?
+        # If source record has 1 type then the first part must NOT refer to the source type - it must be part of the field path
+        # If the source record has 0 or more than 1 sources, then first part MUST refer to a valid type (in the registry or source list), otherwise unresolved type exception
+        record_data = self.source_record.type_data
+        source_type = None
+        real_field_path_parts = self.field_path_parts
+        if record_data.source_count == 1:
+            source_type = record_data.source_records[0].record_type
+        elif record_data.source_count == 0:
+            source_type = registry.get_type(self.field_path_parts[0])
+            real_field_path_parts = self.field_path_parts[1:]
+
+        self.source_type = source_type
+        self.field_path = FieldPath(self.source_type, self.field_path_str)
+        self.resolved = True
+        return self.resolved
 
     @property
     def final_field_type(self):

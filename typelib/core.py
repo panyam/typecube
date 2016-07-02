@@ -40,17 +40,32 @@ class Type(object):
         self.type_args = list(type_args)
         self.type_data = type_data
         self.docs = ""
-        self._resolved = constructor not in ["", None]
+        self._resolved = True
+
+    @property
+    def is_unresolved(self):
+        return not self.is_resolved
 
     @property
     def is_resolved(self):
-        return self._resolved
+        if not self._resolved:
+            return False
+        if self.type_data and hasattr(self.type_data, "is_resolved"):
+            return self.type_data.is_resolved
+        else:
+            return True
 
     def set_resolved(self, value):
         self._resolved = value
 
+    def resolve(self, registry, resolver):
+        if not self.is_resolved:
+            if self.type_data and hasattr(self.type_data, "resolve"):
+                self._resolved = self.type_data.resolve(self, registry, resolver)
+        return self.is_resolved
+
     def copy_from(self, another):
-        self.constructor = constructor
+        self.constructor = another.constructor
         self.type_data = another.type_data
         self.type_args = another.type_args
         self.docs = another.docs

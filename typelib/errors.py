@@ -19,8 +19,13 @@ class TransformerException(TLException):
     def __init__(self, msg):
         Exception.__init__(self, msg)
  
-class TypeNotFoundException(TLException):
-    def __init__(self, fqn):
-        Exception.__init__(self, "Type '%s' not found.  Are class and/or jar paths set correctly?" % fqn)
-        self.missing_type = fqn
+class TypesNotFoundException(TLException):
+    def __init__(self, *fqn):
+        fqn = list(fqn)
+        if len(fqn) > 0:
+            message = "Types (%s) not found." % ", ".join(fqn)
+        else:
+            message = "Type '%s' not found." % fqn
+        Exception.__init__(self, message)
+        self.missing_types = fqn
 

@@ -19,7 +19,6 @@ class TypeRegistry(object):
         self.type_annotations = {}
         self.type_docstrings = {}
         self._resolution_handlers = []
-        self._unresolved_types = set()
 
     def has_type(self, fqn):
         """
@@ -40,7 +39,7 @@ class TypeRegistry(object):
         else:
             return self.type_cache[fqn]
 
-    def register_type(self, name, newtype, annotations = None, docstring = ""):
+    def register_type(self, fqn, newtype, annotations = None, docstring = ""):
         """
         Register's a new type into the registry.  The type can be Unresolved
         if need be.  If a type already exists and is a resolved type, then 
@@ -52,43 +51,25 @@ class TypeRegistry(object):
             False if a type with the given fqn already exists.
         """
 
-        if name in self.type_cache:
+        if fqn in self.type_cache:
             # ensure current one is unresolved otherwise throw an error
-            if self.type_cache[name].is_resolved:
-                raise errors.DuplicateTypeException(name)
+            if self.type_cache[fqn].is_resolved:
+                raise errors.DuplicateTypeException(fqn)
             elif newtype is not None:
-                self.type_cache[name].copy_from(newtype)
+                self.type_cache[fqn].copy_from(newtype)
             else:
                 # Do nothing when current type is unresolved and newtype is None
                 # we wanted to create an unresolved type at this point anyway
                 pass
         else:
             if newtype is not None:
-                self.type_cache[name] = newtype
+                self.type_cache[fqn] = newtype
             else:
-                self.type_cache[name] = core.Type(None)
-                self.type_cache[name].set_resolved(False)
-        self.type_annotations[name] = annotations or []
-        self.type_docstrings[name] = docstring
-        return self.type_cache[name]
-
-    def resolve_type(self, atype):
-        """
-        Resolves a type if it is currently unresolved by replacing it with the new type's
-        details
-
-        For this to succeed:
-            * The type currently registered by atype.fqn must be unresolved.
-            * If atype is of an unresolved type then the resolution is ignored
-
-        Returns:
-            True, if resolution succeeded otherwise False.
-        """
-        if not atype.is_resolved_type or atype.fqn not in self._unresolved_types:
-            return False
-
-        # TBD
-        None.a = 3
+                self.type_cache[fqn] = core.Type(None)
+                self.type_cache[fqn].set_resolved(False)
+        self.type_annotations[fqn] = annotations or []
+        self.type_docstrings[fqn] = docstring
+        return self.type_cache[fqn]
 
     def merge_from(self, another):
         """
@@ -106,18 +87,12 @@ class TypeRegistry(object):
         None.a = 3
 
     @property
-    def resolved_type_names(self):
+    def resolved_types(self):
         """
-        Return a list of all resolved types.
+        Returns the fully qualified names of all types that are currently unresolved.  
+        This is only a copy and modifications to this set will go unnoticed.
         """
-        return [k for (k,v) in self.type_cache.iteritems() if v.is_resolved]
-
-    @property
-    def unresolved_type_names(self):
-        """
-        Return a list of all resolved types.
-        """
-        return [k for (k,v) in self.type_cache.iteritems() if v.is_unresolved]
+        return filter(lambda t: t[1].is_resolved, self.type_cache.iteritems())
 
     @property
     def unresolved_types(self):
@@ -125,17 +100,7 @@ class TypeRegistry(object):
         Returns the fully qualified names of all types that are currently unresolved.  
         This is only a copy and modifications to this set will go unnoticed.
         """
-        return self._unresolved_types[:]
-
-    def on_resolution(self, type_list, handler):
-        """
-        Adds a resolution handler for a given set of types.  This ensures that
-        when *all* of the types in the type_list are resolved, the handler is called
-        with "self" as the only argument.   If the handler returns False then this
-        handler is NOT removed.  If a handler is not removed then in the future the 
-        resolution handler of this type list is invoked again.
-        """
-        self._resolution_handlers.append((type_list, handler))
+        return filter(lambda t: not t[1].is_resolved, self.type_cache.iteritems())
 
     def resolve_types(self):
         del_indexes = []
@@ -151,6 +116,16 @@ class TypeRegistry(object):
                     del_indexes.insert(0, index)
         for index in del_indexes:
             del self._resolution_handlers[index]
+
+    def on_resolution(self, type_list, handler):
+        """
+        Adds a resolution handler for a given set of types.  This ensures that
+        when *all* of the types in the type_list are resolved, the handler is called
+        with "self" as the only argument.   If the handler returns False then this
+        handler is NOT removed.  If a handler is not removed then in the future the 
+        resolution handler of this type list is invoked again.
+        """
+        self._resolution_handlers.append((type_list, handler))
 
     def print_types(self, names = None):
         """
