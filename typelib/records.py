@@ -217,8 +217,6 @@ class Projection(object):
                                         self.annotations or self.source_field.annotations)
                 self._add_field(newfield)
         else:
-            if self.source_field_path.is_absolute:
-                ipdb.set_trace()
             # The Interesting case.  source field could not be found or resolved.
             # There is a chance that this is a "new" field.  That will only be the case if field path has a single entry
             # and target name is not provided and we are not a type stream
