@@ -3,7 +3,6 @@ import os
 import ipdb
 import json
 import core
-import fields
 import utils
 import errors
 

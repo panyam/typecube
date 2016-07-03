@@ -157,11 +157,12 @@ class Record(object):
             for field in proj.resolved_fields:
                 self.add_field(field)
 
+        self._resolved = True
         return True
 
 class Projection(object):
     """
-    Projections are a way of declaring a dependencies between a fields.
+    Projections are a way of declaring a dependencies between fields in a record.
     """
     def __init__(self, parent_record, source_field_path, target_name = None, target_type = None,
                  is_optional = None, default_value = None, annotations = None):
@@ -216,7 +217,7 @@ class Projection(object):
         No field dependencies are generated yet.   This can be done in the next pass (and may not even be required
         since the projection data can be stored as part of the fields).
         """
-        if self.resolved:
+        if self.is_resolved:
             return True
 
         # Find the source field given the field path and the parent record
@@ -231,12 +232,12 @@ class Projection(object):
                     raise errors.TLException("Invalid fields in selection: '%s'", ", ".join(list(missing_fields)))
                 selected_fields = self.source_field_path.get_selected_fields(self.source_field)
                 for field in selected_fields:
-                    newfield = fields.Field(field.name, field.field_type, self.parent_record,
-                                            field.is_optional, field.default_value, field.documentation,
-                                            self.annotations or field.annotations)
+                    newfield = Field(field.name, field.field_type, self.parent_record,
+                                        field.is_optional, field.default_value, field.documentation,
+                                        self.annotations or field.annotations)
                     self._add_field(newfield)
             else:
-                newfield = fields.Field(self.target_name or self.source_field.name,
+                newfield = Field(self.target_name or self.source_field.name,
                                         self.target_type or self.source_field.field_type,
                                         self.parent_record,
                                         self.is_optional if self.is_optional is not None else field.is_optional,
@@ -245,16 +246,17 @@ class Projection(object):
                                         self.annotations or field.annotations)
                 self._add_field(newfield)
         else:
-            # Interesting case.  source field could not be found or resolved.
+            # The Interesting case.  source field could not be found or resolved.
             # There is a chance that this is a "new" field.  That will only be the case if field path has a single entry
             # and target name is not provided and we are not a type stream
-            if self.target_name is None or  \
+            if self.target_name is not None or  \
                     self.target_type is None or \
                     self.source_field_path.length > 1 or \
                     self.source_field_path.has_children:
-                raise errors.TLException("Unable to resolve source field for projection: '%s'", self.source_field_path)
+                ipdb.set_trace()
+                raise errors.TLException("Unable to resolve source field for projection: '%s'" % self.source_field_path)
 
-            newfield = fields.Field(self.target_name,
+            newfield = Field(self.source_field_path.parts[0],
                                     self.target_type,
                                     self.parent_record,
                                     self.is_optional if self.is_optional is not None else False,
@@ -263,10 +265,10 @@ class Projection(object):
                                     self.annotations)
             self._add_field(newfield)
         self._resolved = True
-        return self.resolved
+        return self.is_resolved
 
-    def _add_source_field(self, newfield):
-        self.resolved_fields.add(newfield)
+    def _add_field(self, newfield):
+        self.resolved_fields.append(newfield)
 
     def _resolve_source_field(self):
         """
@@ -295,7 +297,7 @@ class FieldPath(object):
         self.selected_children = selected_children or None
 
     def __str__(self):
-        if self.all_children_selected:
+        if self.all_fields_selected:
             return "%s/*" % "/".join(self.parts)
         elif self.has_children:
             return "%s/(%s)" % ("/".join(self.parts), ", ".join(self.selected_children))
@@ -333,7 +335,7 @@ class Field(object):
     Holds all information about a field within a record.
     """
     def __init__(self, name, field_type, record, optional = False, default = None, docs = "", annotations = None):
-        assert type(name) in (str, unicode)
+        assert type(name) in (str, unicode), "Found type: '%s'" % type(name)
         assert isinstance(field_type, core.Type), type(field_type)
         self.name = name or ""
         self.field_type = field_type
