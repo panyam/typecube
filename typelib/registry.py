@@ -19,6 +19,14 @@ class TypeRegistry(object):
         self.type_docstrings = {}
         self._resolution_handlers = []
 
+        # register default types
+        self.register_type("int", core.IntType)
+        self.register_type("long", core.LongType)
+        self.register_type("float", core.FloatType)
+        self.register_type("double", core.DoubleType)
+        self.register_type("boolean", core.BooleanType)
+        self.register_type("string", core.StringType)
+
     def has_type(self, fqn):
         """
         Returns True if a type exists for the given fully qualified name, 

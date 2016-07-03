@@ -8,43 +8,6 @@ def RecordType(record_data = None):
     record_data = record_data or Record(None)
     return core.Type("record", record_data)
 
-class Bindings(object):
-    """
-    Keeps track where certain names are bound to.   Bindings are created when
-    a record is created and popped off when they are done with.
-    """
-    def __init__(self, parent = None):
-        self.parent = None
-        self.bound_vars = {}
-
-    def push(self):
-        """
-        Push and start a new scope.
-        """
-        return Bindings(self)
-
-    def set(self, name, data_type):
-        """
-        Creates a new binding at the given scope.
-        In any scope from this one and "above", any reference to the variable by the given name
-        will resolve to the provided data_type.   This check is done only after the parent record
-        check has gone through (and assuming the field path is not an absolute path).
-        """
-        if name in self.bound_vars:
-            raise errors.TLException("'%s' already exists in current scope" % name)
-        self.bound_vars[name] = data_types
-
-    def get(self, name):
-        """
-        Gets the "type" associated with a particular name.
-        """
-        if name in self.bound_vars:
-            return self.bound_vars[name]
-        elif self.parent:
-            return self.parent.get(name)
-        else:
-            raise errors.TLException("Name '%s' not found in scope" % name)
-
 class Record(object):
     class SourceRecordRef(object):
         def __init__(self, record_fqn, record_type, alias):
@@ -52,16 +15,22 @@ class Record(object):
             self.alias = alias
             self.record_type = record_type
 
-    def __init__(self, fqn, enclosing_projection = None, field_projections = None):
+        def __repr__(self):
+            return str(self)
+
+        def __str__(self):
+            return "%s as %s" % (self.record_fqn, self.alias)
+
+    def __init__(self, fqn, parent_record = None, field_projections = None):
         """Creates a new Record declaration.
         Arguments:
             fqn                     --  Fully qualified name of the record.  Records should have names.
-            enclosing_projection    --  The projection in which the record is being defined (either as a record mutation or as a brand new record).  
+            parent_record           --  The parent record inside which this record is declared (as an inner declaration)
                                         If this is not provided then this record is being defined independantly at the top level.
             field_projections       --  List of projections that describe field declarations.
         """
         self.fqn = fqn
-        self.enclosing_projection = enclosing_projection
+        self.parent_record = parent_record
         self.field_projections = field_projections or []
         self.resolved = True
         self.fields = {}
@@ -70,9 +39,9 @@ class Record(object):
 
     @property
     def root_record(self):
-        if self.enclosing_projection is None:
+        if self.parent_record is None:
             return self
-        return self.enclosing_projection.parent_record.root_record
+        return self.parent_record.root_record
 
     def add_field(self, field):
         if field.name in self.fields:
@@ -91,7 +60,7 @@ class Record(object):
         """
         Add a new source record that this record derives from.
         """
-        n,ns,fqn = utils.normalize_name_and_ns(source_fqn)
+        n,ns,fqn = utils.normalize_name_and_ns(source_fqn, None)
         alias = alias or n
         if self.find_source(alias) is not None:
             raise errors.TLException("A source by name '%s' already exists" % n)
@@ -134,8 +103,12 @@ class Record(object):
         for source_rec_ref in self.source_records:
             if source_rec_ref.record_type is None or source_rec_ref.record_type.is_unresolved:
                 source_rec_type = registry.get_type(source_rec_ref.record_fqn)
-                if source_rec_type is None or source_rec_type.is_unresolved:
+                if source_rec_type is None:
                     unresolved_types.add(source_rec_ref.record_fqn)
+                elif source_rec_type.is_unresolved:
+                    source_rec_type.resolve(registry, resolver)
+                    if source_rec_type.is_unresolved:
+                        unresolved_types.add(source_rec_ref.record_fqn)
                 else:
                     source_rec_ref.record_type = source_rec_type
 
@@ -161,6 +134,11 @@ class Record(object):
 
         self._resolved = True
         return True
+
+TYPE_CHANGE_NONE        = 0
+TYPE_CHANGE_RETYPE      = 1
+TYPE_CHANGE_MUTATION    = 2
+TYPE_CHANGE_STREAMING   = 3
 
 class Projection(object):
     """
@@ -223,51 +201,62 @@ class Projection(object):
             return True
 
         # Find the source field given the field path and the parent record
-        # Leave the details out for now.  This should give us the field that will be 
-        # copied to here.
-        self.source_field = self._resolve_source_field()
+        # This should give us the field that will be copied to here.
+        self.starting_record, self.source_field = self._resolve_source_field()
 
         if self.source_field:
             if self.source_field_path.has_children:
-                missing_fields = set(self.source_field_path.selected_children) - set([f.name for f in source_field.field_type.type_data.fields])
-                if len(missing_fields) > 0:
-                    raise errors.TLException("Invalid fields in selection: '%s'", ", ".join(list(missing_fields)))
-                selected_fields = self.source_field_path.get_selected_fields(self.source_field)
-                for field in selected_fields:
-                    newfield = Field(field.name, field.field_type, self.parent_record,
-                                        field.is_optional, field.default_value, field.documentation,
-                                        self.annotations or field.annotations)
-                    self._add_field(newfield)
+                self._include_child_fields(self.source_field.field_type)
             else:
                 newfield = Field(self.target_name or self.source_field.name,
                                         self.target_type or self.source_field.field_type,
                                         self.parent_record,
-                                        self.is_optional if self.is_optional is not None else field.is_optional,
-                                        self.default_value if self.default_value is not None else field.default_value,
-                                        field.documentation,
-                                        self.annotations or field.annotations)
+                                        self.is_optional if self.is_optional is not None else self.source_field.is_optional,
+                                        self.default_value if self.default_value is not None else self.source_field.default_value,
+                                        self.source_field.documentation,
+                                        self.annotations or self.source_field.annotations)
                 self._add_field(newfield)
         else:
+            if self.source_field_path.is_absolute:
+                ipdb.set_trace()
             # The Interesting case.  source field could not be found or resolved.
             # There is a chance that this is a "new" field.  That will only be the case if field path has a single entry
             # and target name is not provided and we are not a type stream
-            if self.target_name is not None or  \
-                    self.target_type is None or \
-                    self.source_field_path.length > 1 or \
-                    self.source_field_path.has_children:
-                ipdb.set_trace()
-                raise errors.TLException("Unable to resolve source field for projection: '%s'" % self.source_field_path)
-
-            newfield = Field(self.source_field_path.parts[0],
-                                    self.target_type,
-                                    self.parent_record,
-                                    self.is_optional if self.is_optional is not None else False,
-                                    self.default_value,
-                                    "",
-                                    self.annotations)
-            self._add_field(newfield)
+            print "FieldPath: ", self.source_field_path
+            if self.source_field_path.has_children:
+                if self.source_field_path.length == 0 and self.starting_record != None:
+                    # then we are starting from the root itself of the starting record as "multiple" entries
+                    self._include_child_fields(self.starting_record)
+                else:
+                    raise errors.TLException("New Field '%s' in '%s' must not have child selections" % (self.source_field_path, self.parent_record.type_data.fqn))
+            elif self.target_name is not None:
+                raise errors.TLException("New Field '%s' in '%s' should not have a target_name" % (self.source_field_path, self.parent_record.type_data.fqn))
+            elif self.target_type is None:
+                raise errors.TLException("New Field '%s' in '%s' does not have a target_type" % (self.source_field_path, self.parent_record.type_data.fqn))
+            elif self.source_field_path.length > 1:
+                raise errors.TLException("New Field '%s' in '%s' must not be a field path" % (self.source_field_path, self.parent_record.type_data.fqn))
+            else:
+                newfield = Field(self.source_field_path.get(0),
+                                        self.target_type,
+                                        self.parent_record,
+                                        self.is_optional if self.is_optional is not None else False,
+                                        self.default_value,
+                                        "",
+                                        self.annotations)
+                self._add_field(newfield)
         self._resolved = True
         return self.is_resolved
+
+    def _include_child_fields(self, starting_record):
+        missing_fields = set(self.source_field_path.selected_children) - set(starting_record.type_data.fields.keys())
+        if len(missing_fields) > 0:
+            raise errors.TLException("Invalid fields in selection: '%s'", ", ".join(list(missing_fields)))
+        selected_fields = self.source_field_path.get_selected_fields(starting_record)
+        for field in selected_fields.values():
+            newfield = Field(field.name, field.field_type, self.parent_record,
+                                field.is_optional, field.default_value, field.documentation,
+                                self.annotations or field.annotations)
+            self._add_field(newfield)
 
     def _add_field(self, newfield):
         self.resolved_fields.append(newfield)
@@ -277,7 +266,40 @@ class Projection(object):
         This is the tricky bit.  Given our current field path, we need to find the source type and field within 
         the type that this field path corresponds to.
         """
-        return None
+        record_data = self.parent_record.type_data
+        if not record_data.has_sources:
+            # If we have no sources then there is nothing to resolve so the field path must
+            # be referring to a "new" field
+            return None, None
+
+        if record_data.source_count > 1:
+            raise errors.TLException("Multiple source derivation not yet supported")
+
+        starting_record = record_data.source_records[0].record_type
+        if self.source_field_path.is_absolute:
+            # we are talking about absolute paths so go to the root record first
+            while True:
+                if not starting_record.type_data.parent_record:
+                    break
+                starting_record = starting_record.type_data.parent_record
+
+        # resolve the field path from the starting record
+        final_type = starting_record
+        final_field = None
+        for i in xrange(0, self.source_field_path.length):
+            part = self.source_field_path.get(i)
+            if final_type.constructor != "record":
+                # Cannot be resolved as the ith part from the source_record is NOT of type record
+                # so we cannot go any further
+                return starting_record, None
+            fields = final_type.type_data.fields
+            if part not in fields:
+                ipdb.set_trace()
+                return starting_record, None
+            final_field = fields[part]
+            final_type = final_field.field_type
+
+        return starting_record, final_field
 
 class FieldPath(object):
     def __init__(self, parts, selected_children = None):
@@ -295,24 +317,38 @@ class FieldPath(object):
         if type(parts) in (str, unicode):
             parts = parts.strip()
             parts = parts.split("/")
-        self.parts = parts
+        self._parts = parts
         self.selected_children = selected_children or None
+
+    def __repr__(self): 
+        return str(self)
 
     def __str__(self):
         if self.all_fields_selected:
-            return "%s/*" % "/".join(self.parts)
+            return "%s/*" % "/".join(self._parts)
         elif self.has_children:
-            return "%s/(%s)" % ("/".join(self.parts), ", ".join(self.selected_children))
+            return "%s/(%s)" % ("/".join(self._parts), ", ".join(self.selected_children))
         else:
-            return "/".join(self.parts)
+            return "/".join(self._parts)
 
     @property
     def length(self):
-        return len(self.parts)
+        if self.is_absolute:
+            return len(self._parts) - 1
+        else:
+            return len(self._parts)
+
+    def get(self, index):
+        """
+        Gets the field path part at a given index taking into account whether the path is absolute or not.
+        """
+        if self.is_absolute:
+            index += 1
+        return self._parts[index]
 
     @property
     def is_absolute(self):
-        return self.parts[0] == ""
+        return self._parts[0] == ""
 
     @property
     def has_children(self):
@@ -322,15 +358,15 @@ class FieldPath(object):
     def all_fields_selected(self):
         return self.selected_children == "*"
 
-    def get_selected_fields(self, source_field):
+    def get_selected_fields(self, starting_record):
         """
         Given a source field, return all child fields as per the selected_fields spec.
         """
-        fields = source_field.field_type.type_data.fields
+        fields = starting_record.type_data.fields
         if self.all_fields_selected:
             return fields
         else:
-            return filter(lambda x: x.name in self.selected_fields, fields)
+            return dict([(k,v) for (k,v) in fields.iteritems() if k in self.selected_children])
 
 class Field(object):
     """
@@ -392,3 +428,40 @@ class Field(object):
     def __repr__(self): return str(self)
     def __str__(self):
         return self.fqn
+
+class Bindings(object):
+    """
+    Keeps track where certain names are bound to.   Bindings are created when
+    a record is created and popped off when they are done with.
+    """
+    def __init__(self, parent = None):
+        self.parent = None
+        self.bound_vars = {}
+
+    def push(self):
+        """
+        Push and start a new scope.
+        """
+        return Bindings(self)
+
+    def set(self, name, data_type):
+        """
+        Creates a new binding at the given scope.
+        In any scope from this one and "above", any reference to the variable by the given name
+        will resolve to the provided data_type.   This check is done only after the parent record
+        check has gone through (and assuming the field path is not an absolute path).
+        """
+        if name in self.bound_vars:
+            raise errors.TLException("'%s' already exists in current scope" % name)
+        self.bound_vars[name] = data_types
+
+    def get(self, name):
+        """
+        Gets the "type" associated with a particular name.
+        """
+        if name in self.bound_vars:
+            return self.bound_vars[name]
+        elif self.parent:
+            return self.parent.get(name)
+        else:
+            raise errors.TLException("Name '%s' not found in scope" % name)
