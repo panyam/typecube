@@ -246,9 +246,11 @@ class Projection(object):
         return self.is_resolved
 
     def _include_child_fields(self, starting_record):
-        missing_fields = set(self.source_field_path.selected_children) - set(starting_record.type_data.fields.keys())
-        if len(missing_fields) > 0:
-            raise errors.TLException("Invalid fields in selection: '%s'", ", ".join(list(missing_fields)))
+        if not self.source_field_path.all_fields_selected:
+            missing_fields = set(self.source_field_path.selected_children) - set(starting_record.type_data.fields.keys())
+            if len(missing_fields) > 0:
+                ipdb.set_trace()
+                raise errors.TLException("Invalid fields in selection: '%s'" % ", ".join(list(missing_fields)))
         selected_fields = self.source_field_path.get_selected_fields(starting_record)
         for field in selected_fields.values():
             newfield = Field(field.name, field.field_type, self.parent_record,
