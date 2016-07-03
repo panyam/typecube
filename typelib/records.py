@@ -5,7 +5,7 @@ import core
 import ipdb
 
 def RecordType(record_data = None):
-    record_data = record_data or Record()
+    record_data = record_data or Record(None)
     return core.Type("record", record_data)
 
 class Bindings(object):
@@ -52,13 +52,15 @@ class Record(object):
             self.alias = alias
             self.record_type = record_type
 
-    def __init__(self, enclosing_projection = None, field_projections = None):
+    def __init__(self, fqn, enclosing_projection = None, field_projections = None):
         """Creates a new Record declaration.
         Arguments:
-        enclosing_projection    --  The projection in which the record is being defined (either as a record mutation or as a brand new record).  
-                                    If this is not provided then this record is being defined independantly at the top level.
-        field_projections       --  List of projections that describe field declarations.
+            fqn                     --  Fully qualified name of the record.  Records should have names.
+            enclosing_projection    --  The projection in which the record is being defined (either as a record mutation or as a brand new record).  
+                                        If this is not provided then this record is being defined independantly at the top level.
+            field_projections       --  List of projections that describe field declarations.
         """
+        self.fqn = fqn
         self.enclosing_projection = enclosing_projection
         self.field_projections = field_projections or []
         self.resolved = True
@@ -355,7 +357,10 @@ class Field(object):
 
     @property
     def fqn(self):
-        return self.record.fqn + "." + self.name
+        if self.record.type_data.fqn:
+            return self.record.type_data.fqn + "." + self.name
+        else:
+            return self.name
 
     def __hash__(self):
         return hash(self.fqn)
