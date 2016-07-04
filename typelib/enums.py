@@ -16,6 +16,7 @@ class EnumData(object):
             return self.name
  
     def __init__(self, *symbols):
+        self.fqn = None
         self.symbols = list(*symbols)
         self.source_types = []
         self.annotations = []
@@ -27,7 +28,7 @@ class EnumData(object):
         self.symbols.append(EnumData.Symbol(name, annotations, doc))
  
     def __str__(self):
-        return "[%s: %s]" % (self.name, ",".join(self.symbols))
+        return "[%s: %s]" % (self.fqn, ",".join([s.name for s in self.symbols]))
  
     def to_json(self, thetype, visited = None):
         out = {

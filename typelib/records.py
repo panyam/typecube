@@ -44,7 +44,7 @@ class Record(object):
     def root_record(self):
         if self.parent_record is None:
             return self
-        return self.parent_record.root_record
+        return self.parent_record.type_data.root_record
 
     def add_field(self, field):
         if field.name in self.fields:
@@ -164,6 +164,12 @@ class Projection(object):
                                 of the source field.
         annotations         --  Any annotations that apply to this projection (common ones are type mappers).
         """
+
+        # Two issues to consider:
+        # 1. Matter of scopes - ie how variables names or names in general are bound to?  Should scopes just be 
+        #    dicts or should we have "scope providers" where records and projections all participate?
+        # 2. Should any kind of type change just be a function that creates a new type given the current
+        #    lexical scope?
         self.parent_record = parent_record
         self.source_field_path = source_field_path
         self.target_type = target_type
@@ -304,7 +310,6 @@ class Projection(object):
         This is the tricky bit.  Given our current field path, we need to find the source type and field within 
         the type that this field path corresponds to.
         """
-        # if str(self.source_field_path) == "/ceo": ipdb.set_trace()
         record_data = self.parent_record.type_data
         if not record_data.has_sources:
             # If we have no sources then there is nothing to resolve so the field path must
@@ -314,13 +319,10 @@ class Projection(object):
         if record_data.source_count > 1:
             raise errors.TLException("Multiple source derivation not yet supported")
 
+        # if str(self.source_field_path) == "/ceo": ipdb.set_trace()
         starting_record = record_data.source_records[0].record_type
         if self.source_field_path.is_absolute:
-            # we are talking about absolute paths so go to the root record first
-            while True:
-                if not starting_record.type_data.parent_record:
-                    break
-                starting_record = starting_record.type_data.parent_record
+            starting_record = record_data.root_record.source_records[0].record_type
 
         # resolve the field path from the starting record
         final_type = starting_record
