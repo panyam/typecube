@@ -42,6 +42,9 @@ class Type(object):
         self.docs = ""
         self._resolved = True
 
+    def __repr__(self):
+        return "<Type: %s %s>" % (self.constructor, self.type_data)
+
     @property
     def is_unresolved(self):
         return not self.is_resolved
@@ -58,10 +61,10 @@ class Type(object):
     def set_resolved(self, value):
         self._resolved = value
 
-    def resolve(self, registry, resolver):
+    def resolve(self, registry):
         if not self.is_resolved:
             if self.type_data and hasattr(self.type_data, "resolve"):
-                self._resolved = self.type_data.resolve(self, registry, resolver)
+                self._resolved = self.type_data.resolve(self, registry)
         return self.is_resolved
 
     def copy_from(self, another):

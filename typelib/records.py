@@ -37,6 +37,9 @@ class Record(object):
         self.source_records = []
         self.bindings = Bindings()
 
+    def __repr__(self):
+        return "<Name: '%s', Fields: (%s)>" % (self.fqn, ", ".join(map(repr, self.fields)))
+
     @property
     def root_record(self):
         if self.parent_record is None:
@@ -88,7 +91,7 @@ class Record(object):
         return len(self.source_records)
 
 
-    def resolve(self, thetype, registry, resolver):
+    def resolve(self, thetype, registry):
         """
         Tries to resolve all dependencies for this record.
 
@@ -106,7 +109,7 @@ class Record(object):
                 if source_rec_type is None:
                     unresolved_types.add(source_rec_ref.record_fqn)
                 elif source_rec_type.is_unresolved:
-                    source_rec_type.resolve(registry, resolver)
+                    source_rec_type.resolve(registry)
                     if source_rec_type.is_unresolved:
                         unresolved_types.add(source_rec_ref.record_fqn)
                 else:
@@ -170,6 +173,9 @@ class Projection(object):
         self.annotations = annotations or []
         self._resolved = False
         self.resolved_fields = []
+        self.type_change_type = TYPE_CHANGE_NONE
+        if target_type:
+            self.type_change_type = TYPE_CHANGE_RETYPE
 
         if source_field_path.selected_children is not None:
             assert target_type is None and \
@@ -242,6 +248,39 @@ class Projection(object):
                                         "",
                                         self.annotations)
                 self._add_field(newfield)
+
+        # Now that the source field has been resolved, we can start resolving target type for
+        # mutations and streamings
+        if self.type_change_type == TYPE_CHANGE_MUTATION:
+            if self.target_type is None:
+                raise errors.TLException("Record MUST be specified on a mutation")
+
+            if self.source_field_path.has_children or len(self.resolved_fields) > 1:
+                raise errors.TLException("Record mutation cannot be applied when selecting multiple fields")
+
+            parent_fqn = self.parent_record.type_data.fqn
+            if not parent_fqn:
+                # Parent name MUST be set otherwise it means parent resolution would have failed!
+                raise errors.TLException("Parent record name not set.  May be it is not yet resolved?")
+
+            field_name = self.resolved_fields[0].name
+            if not field_name:
+                raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
+
+            field_type = self.resolved_fields[0].field_type
+            if not field_type:
+                raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
+
+            if field_type.constructor != "record":
+                raise errors.TLException("Cannot mutate a type that is not a record.  Yet")
+
+            if self.target_type.type_data.fqn is None:
+                parent_name,ns,parent_fqn = utils.normalize_name_and_ns(parent_fqn, None)
+                self.target_type.type_data.fqn = parent_fqn + "_" + field_name
+                self.target_type.type_data.add_source_record(self.source_field.field_type.type_data.fqn, field_type)
+                if not self.target_type.resolve(registry):
+                    raise errors.TLException("Could not resolve record mutation for field '%s' in record '%s'" % (field_name, parent_fqn))
+
         self._resolved = True
         return self.is_resolved
 
@@ -249,7 +288,6 @@ class Projection(object):
         if not self.source_field_path.all_fields_selected:
             missing_fields = set(self.source_field_path.selected_children) - set(starting_record.type_data.fields.keys())
             if len(missing_fields) > 0:
-                ipdb.set_trace()
                 raise errors.TLException("Invalid fields in selection: '%s'" % ", ".join(list(missing_fields)))
         selected_fields = self.source_field_path.get_selected_fields(starting_record)
         for field in selected_fields.values():
@@ -266,6 +304,7 @@ class Projection(object):
         This is the tricky bit.  Given our current field path, we need to find the source type and field within 
         the type that this field path corresponds to.
         """
+        # if str(self.source_field_path) == "/ceo": ipdb.set_trace()
         record_data = self.parent_record.type_data
         if not record_data.has_sources:
             # If we have no sources then there is nothing to resolve so the field path must
@@ -294,7 +333,6 @@ class Projection(object):
                 return starting_record, None
             fields = final_type.type_data.fields
             if part not in fields:
-                ipdb.set_trace()
                 return starting_record, None
             final_field = fields[part]
             final_type = final_field.field_type
