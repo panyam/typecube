@@ -227,6 +227,39 @@ class ProjectionTarget(object):
         if target_type:
             self.type_change_type = TYPE_CHANGE_RETYPE
 
+    def resolve(self, registry, parent_record, projection):
+        psource = projection.source
+        source_field = psource.source_field
+        if self.type_change_type == TYPE_CHANGE_MUTATION:
+            if self.target_type is None:
+                raise errors.TLException("Record MUST be specified on a mutation")
+
+            if psource.field_path.has_children or len(projection.resolved_fields) > 1:
+                raise errors.TLException("Record mutation cannot be applied when selecting multiple fields")
+
+            parent_fqn = parent_record.type_data.fqn
+            if not parent_fqn:
+                # Parent name MUST be set otherwise it means parent resolution would have failed!
+                raise errors.TLException("Parent record name not set.  May be it is not yet resolved?")
+
+            field_name = projection.resolved_fields[0].name
+            if not field_name:
+                raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
+
+            field_type = projection.resolved_fields[0].field_type
+            if not field_type:
+                raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
+
+            if field_type.constructor != "record":
+                raise errors.TLException("Cannot mutate a type that is not a record.  Yet")
+
+            if self.target_type.type_data.fqn is None:
+                parent_name,ns,parent_fqn = utils.normalize_name_and_ns(parent_fqn, None)
+                self.target_type.type_data.fqn = parent_fqn + "_" + field_name
+                self.target_type.type_data.add_source_record(source_field.field_type.type_data.fqn, field_type)
+                if not self.target_type.resolve(registry):
+                    raise errors.TLException("Could not resolve record mutation for field '%s' in record '%s'" % (field_name, parent_fqn))
+
 class Projection(object):
     """
     Projections are a way of declaring a dependencies between fields in a record.
@@ -245,8 +278,8 @@ class Projection(object):
         self.source = psource
         self.target = ptarget
         self.annotations = annotations or []
-        self._resolved = False
         self.resolved_fields = []
+        self._resolved = False
 
     @property
     def is_resolved(self):
@@ -282,9 +315,19 @@ class Projection(object):
         # This should give us the field that will be copied to here.
         self.source.resolve(registry, self.parent_record)
 
+        self._generate_resolved_fields()
+
+        # Now that the source field has been resolved, we can start resolving target type for
+        # mutations and streamings
+        if self.target:
+            self.target.resolve(registry, self.parent_record, self)
+
+        self._resolved = True
+        return self.is_resolved
+
+    def _generate_resolved_fields(self):
         source_field = self.source.source_field
         starting_record = self.source.starting_record
-
         if source_field:
             if self.source.field_path.has_children:
                 self._include_child_fields(source_field.field_type)
@@ -323,41 +366,6 @@ class Projection(object):
                                         "",
                                         self.annotations)
                 self._add_field(newfield)
-
-        # Now that the source field has been resolved, we can start resolving target type for
-        # mutations and streamings
-        if self.target and self.target.type_change_type == TYPE_CHANGE_MUTATION:
-            if self.target.target_type is None:
-                raise errors.TLException("Record MUST be specified on a mutation")
-
-            if self.source.field_path.has_children or len(self.resolved_fields) > 1:
-                raise errors.TLException("Record mutation cannot be applied when selecting multiple fields")
-
-            parent_fqn = self.parent_record.type_data.fqn
-            if not parent_fqn:
-                # Parent name MUST be set otherwise it means parent resolution would have failed!
-                raise errors.TLException("Parent record name not set.  May be it is not yet resolved?")
-
-            field_name = self.resolved_fields[0].name
-            if not field_name:
-                raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
-
-            field_type = self.resolved_fields[0].field_type
-            if not field_type:
-                raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
-
-            if field_type.constructor != "record":
-                raise errors.TLException("Cannot mutate a type that is not a record.  Yet")
-
-            if self.target.target_type.type_data.fqn is None:
-                parent_name,ns,parent_fqn = utils.normalize_name_and_ns(parent_fqn, None)
-                self.target.target_type.type_data.fqn = parent_fqn + "_" + field_name
-                self.target.target_type.type_data.add_source_record(source_field.field_type.type_data.fqn, field_type)
-                if not self.target.target_type.resolve(registry):
-                    raise errors.TLException("Could not resolve record mutation for field '%s' in record '%s'" % (field_name, parent_fqn))
-
-        self._resolved = True
-        return self.is_resolved
 
     def _include_child_fields(self, starting_record):
         if not self.source.field_path.all_fields_selected:
