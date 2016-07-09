@@ -2,8 +2,9 @@
 import core
 
 def EnumType(enum_data = None):
-    enum_data = enum_data or EnumData()
-    return core.Type("enum", enum_data)
+    out = core.Type("enum", None)
+    out.type_data = enum_data or EnumData()
+    return out
 
 class EnumData(object):
     class Symbol(object):
