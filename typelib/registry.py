@@ -13,7 +13,8 @@ class TypeRegistry(object):
     or record file can choose to mark types as UnresolvedTypes so these
     types can be resolved later lazily.
     """
-    def __init__(self):
+    def __init__(self, parent_registry = None):
+        self.parent = parent_registry
         self.type_cache = {}
         self.type_annotations = {}
         self.type_docstrings = {}
@@ -33,7 +34,7 @@ class TypeRegistry(object):
         otherwise returns False
         """
         fqn = (fqn or "").strip()
-        return fqn in self.type_cache
+        return fqn in self.type_cache or (self.parent and self.parent.has_type(fqn))
 
     def get_type(self, fqn, nothrow = False):
         """
@@ -41,10 +42,14 @@ class TypeRegistry(object):
         None is returned.
         """
         fqn = (fqn or "").strip()
-        if nothrow:
-            return self.type_cache.get(fqn, None)
-        else:
-            return self.type_cache[fqn]
+        out = None
+        if fqn in self.type_cache:
+            out = self.type_cache[fqn]
+        elif self.parent:
+            out = self.parent.get_type(fqn, nowthrow = True)
+        if not out and not nothrow:
+            raise errors.TLException("Type '%s' not found" % fqn)
+        return out
 
     def register_type(self, fqn, newtype, annotations = None, docstring = ""):
         """

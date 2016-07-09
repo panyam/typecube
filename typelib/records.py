@@ -21,30 +21,50 @@ class Record(object):
         def __str__(self):
             return "%s as %s" % (self.record_fqn, self.alias)
 
-    def __init__(self, fqn, parent_record = None, field_projections = None):
+    def __init__(self, fqn, parent_entity = None, field_projections = None):
         """Creates a new Record declaration.
         Arguments:
             fqn                     --  Fully qualified name of the record.  Records should have names.
-            parent_record           --  The parent record inside which this record is declared (as an inner declaration)
+            parent_entity           --  The parent record or projection inside which this record is declared (as an inner declaration)
                                         If this is not provided then this record is being defined independantly at the top level.
             field_projections       --  List of projections that describe field declarations.
         """
         self.fqn = fqn
-        self.parent_record = parent_record
+        self._parent_entity = parent_entity
         self.field_projections = field_projections or []
         self.resolved = True
         self.fields = {}
         self.source_records = []
         self.bindings = Bindings()
 
+    @property
+    def parent_entity(self):
+        return self._parent_entity
+
+    @parent_entity.setter
+    def parent_entity(self, value):
+        None.a = 3
+
     def __repr__(self):
         return "<Name: '%s', Fields: (%s)>" % (self.fqn, ", ".join(map(repr, self.fields)))
 
     @property
     def root_record(self):
-        if self.parent_record is None:
+        if self.parent_entity is None:
             return self
-        return self.parent_record.type_data.root_record
+        if type(self.parent_entity) is core.Type:
+            return self.parent_entity.type_data.root_record
+        else:
+            return self.parent_entity.root_record
+
+    def get_binding(self, field_path):
+        """
+        Gets a particular binding by a given name.  For a record this will be a field name within this record.
+        """
+        name = field_path.get(0)
+        if name in self.fields:
+            return self, field_path
+        return None, None
 
     def add_field(self, field):
         if field.name in self.fields:
@@ -91,7 +111,7 @@ class Record(object):
         return len(self.source_records)
 
 
-    def resolve(self, thetype, registry):
+    def resolve(self, registry):
         """
         Tries to resolve all dependencies for this record.
 
@@ -138,31 +158,81 @@ class Record(object):
         self._resolved = True
         return True
 
-TYPE_CHANGE_NONE        = 0
-TYPE_CHANGE_RETYPE      = 1
-TYPE_CHANGE_MUTATION    = 2
-TYPE_CHANGE_STREAMING   = 3
+PROJECTION_TYPE_PLAIN        = 0
+PROJECTION_TYPE_RETYPE      = 1
+PROJECTION_TYPE_MUTATION    = 2
+PROJECTION_TYPE_STREAMING   = 3
 
 class Projection(object):
     """
     Projections are a way of declaring a dependencies between fields in a record.
     """
-    def __init__(self, parent_record, psource, ptarget, annotations):
+    def __init__(self, parent_entity, field_path, target_name, target_type, annotations):
         """Creates a projection.
         Arguments:
+        field_path      --  A FieldPath instance that contains the field path to the source field as well 
+                            as any child field selectors if any.
+        target_name     --  Specifies whether the field projected from the source path is to be renamed.  
+                            If None then the same name as the source field path is used.
+        target_type     --  Specifies whether the field is to be re-typed in the destination record.
+        is_optional     --  Whether the field is optional.  
+                                If True/False field is optional or required.
+                                If None then this value is derived from the source field.
+        default_value   --  Default value of the field.  If None, then the value is the default_value 
+                            of the source field.
         """
-        self.parent_record = parent_record
-
         # Two issues to consider:
         # 1. Matter of scopes - ie how variables names or names in general are bound to?  Should scopes just be 
         #    dicts or should we have "scope providers" where records and projections all participate?
         # 2. Should any kind of type change just be a function that creates a new type given the current
         #    lexical scope?
-        self.source = psource
-        self.target = ptarget
+        if field_path is None or field_path.is_blank:
+            field_path = None
+        self.field_path = field_path
+        self.target_name = target_name
+        self._resolved_type = None
+        self.is_optional = None
+        self.default_value = None
+        self.target_type = target_type
+        self.projection_type = PROJECTION_TYPE_PLAIN
+        if target_type:
+            self.projection_type = PROJECTION_TYPE_RETYPE
         self.annotations = annotations or []
         self.resolved_fields = []
         self._resolved = False
+        self._parent_entity = parent_entity
+        self.path_resolver = PathResolver(parent_entity)
+
+    @property
+    def parent_entity(self):
+        return self._parent_entity
+
+    @parent_entity.setter
+    def parent_entity(self, value):
+        None.a = 3
+
+    @property
+    def root_record(self):
+        if type(self.parent_entity) is Projection:
+            return self.parent_entity.root_record
+        else:
+            # must be a record otherwise
+            return self.parent_entity.type_data.root_record
+
+    def get_binding(self, field_path):
+        """
+        Gets a particular binding by a given name.  For a projection, this is the parameter
+        by the given name if the projection type is streaming otherwise if the projection
+        type is a mutation then the resolved value is the type of the field within the 
+        record (from the source).
+        """
+        if self.target_type:
+            first_part = field_path.get(0)
+            for index,param in enumerate(self.target_type.param_names):
+                if param == first_part:
+                    type_arg = self.source_field.field_type.type_args[index]
+                    return type_arg.type_data, FieldPath(field_path._parts[1:], field_path.selected_children)
+        return None, None
 
     @property
     def is_resolved(self):
@@ -186,40 +256,64 @@ class Projection(object):
         if self.is_resolved:
             return True
 
-        if self.source.field_path.selected_children is not None:
-            assert self.source.name is None and \
+        if self.field_path and self.field_path.selected_children is not None:
+            assert self.target_name is None and \
                    self.target is None or (
-                            self.target.target_type is None and     \
-                            self.target.is_optional is None and     \
-                            self.target.default_value is None),     \
+                            self.target_type is None and     \
+                            self.is_optional is None and     \
+                            self.default_value is None),     \
                    "When selected_children is specified, target_type, target_name, default_value and is_optional must all be None"
 
-        self._generate_resolved_fields(registry)
+        self.source_field = None
+        self.starting_record = None
+
+        if self.field_path:
+            if str(self.field_path) == "ind/labels":
+                ipdb.set_trace()
+            self.resolve_source_fields(registry)
+            source_field = self.source_field
+            starting_record = self.starting_record
+            # Once fields are created, check for the streaming and other field type constraints
+            # If there are binding params, see whether the number match the source_field.field_type's type args
+            if self.target_type and self.projection_type == PROJECTION_TYPE_STREAMING:
+                if len(self.target_type.param_names) != source_field.field_type.arglimit:
+                    raise errors.TLException("Number of streamed arguments does not match argument count of type")
 
         # Now that the source field has been resolved, we can start resolving target type for
         # mutations and streamings
-        if self.target:
-            self.target.resolve(registry, self.parent_record, self)
+        self.resolve_target(registry)
 
         self._resolved = True
         return self.is_resolved
 
-    def _generate_resolved_fields(self, registry):
+    def resolve_source_fields(self, registry):
         # Find the source field given the field path and the parent record
         # This should give us the field that will be copied to here.
-        self.source.resolve(registry, self.parent_record)
+        self.starting_record, self.source_field, self.final_field_path = self.path_resolver.resolve_path(self, registry)
 
-        source_field = self.source.source_field
-        starting_record = self.source.starting_record
+        source_field = self.source_field
+        starting_record = self.starting_record
+
         if source_field:
-            if self.source.field_path.has_children:
+            if self.field_path.has_children:
                 self._include_child_fields(source_field.field_type)
             else:
-                newfield = Field(self.source.name or source_field.name,
-                                        self.target.target_type or source_field.field_type,
-                                        self.parent_record,
-                                        self.target.is_optional if self.target.is_optional is not None else source_field.is_optional,
-                                        self.target.default_value if self.target.default_value is not None else source_field.default_value,
+                target_type = source_field.field_type
+                is_optional = source_field.is_optional
+                default_value = source_field.default_value
+
+                if self.target_type:
+                    target_type = self.target_type
+                if self.is_optional:
+                    is_optional = self.is_optional
+                if self.default_value:
+                    default_value = self.default_value
+
+                newfield = Field(self.target_name or source_field.name,
+                                        target_type,
+                                        self.parent_entity,
+                                        is_optional,
+                                        default_value,
                                         source_field.documentation,
                                         self.annotations or source_field.annotations)
                 self._add_field(newfield)
@@ -227,37 +321,38 @@ class Projection(object):
             # The Interesting case.  source field could not be found or resolved.
             # There is a chance that this is a "new" field.  That will only be the case if field path has a single entry
             # and target name is not provided and we are not a type stream
-            print "FieldPath: ", self.source.field_path
-            if self.source.field_path.has_children:
-                if self.source.field_path.length == 0 and starting_record != None:
+            print "FieldPath: ", self.field_path
+            if self.field_path.has_children:
+                if self.field_path.length == 0 and starting_record != None:
                     # then we are starting from the root itself of the starting record as "multiple" entries
                     self._include_child_fields(starting_record)
                 else:
-                    raise errors.TLException("New Field '%s' in '%s' must not have child selections" % (self.source.field_path, self.parent_record.type_data.fqn))
-            elif self.source.name is not None:
-                raise errors.TLException("New Field '%s' in '%s' should not have a target_name" % (self.source.field_path, self.parent_record.type_data.fqn))
-            elif self.target.target_type is None:
-                raise errors.TLException("New Field '%s' in '%s' does not have a target_type" % (self.source.field_path, self.parent_record.type_data.fqn))
-            elif self.source.field_path.length > 1:
-                raise errors.TLException("New Field '%s' in '%s' must not be a field path" % (self.source.field_path, self.parent_record.type_data.fqn))
+                    raise errors.TLException("New Field '%s' in '%s' must not have child selections" % (self.field_path, self.parent_entity.type_data.fqn))
+            elif self.target_name is not None:
+                raise errors.TLException("New Field '%s' in '%s' should not have a target_name" % (self.field_path, self.parent_entity.type_data.fqn))
+            elif self.target_type is None:
+                ipdb.set_trace()
+                raise errors.TLException("New Field '%s' in '%s' does not have a target_type" % (self.field_path, self.parent_entity.type_data.fqn))
+            elif self.field_path.length > 1:
+                raise errors.TLException("New Field '%s' in '%s' must not be a field path" % (self.field_path, self.parent_entity.type_data.fqn))
             else:
-                newfield = Field(self.source.field_path.get(0),
-                                        self.target.target_type,
-                                        self.parent_record,
-                                        self.target.is_optional if self.target.is_optional is not None else False,
-                                        self.target.default_value,
+                newfield = Field(self.field_path.get(0),
+                                        self.target_type,
+                                        self.parent_entity,
+                                        self.is_optional if self.is_optional is not None else False,
+                                        self.default_value,
                                         "",
                                         self.annotations)
                 self._add_field(newfield)
 
     def _include_child_fields(self, starting_record):
-        if not self.source.field_path.all_fields_selected:
-            missing_fields = set(self.source.field_path.selected_children) - set(starting_record.type_data.fields.keys())
+        if not self.field_path.all_fields_selected:
+            missing_fields = set(self.field_path.selected_children) - set(starting_record.type_data.fields.keys())
             if len(missing_fields) > 0:
                 raise errors.TLException("Invalid fields in selection: '%s'" % ", ".join(list(missing_fields)))
-        selected_fields = self.source.field_path.get_selected_fields(starting_record)
+        selected_fields = self.field_path.get_selected_fields(starting_record)
         for field in selected_fields.values():
-            newfield = Field(field.name, field.field_type, self.parent_record,
+            newfield = Field(field.name, field.field_type, self.parent_entity,
                                 field.is_optional, field.default_value, field.documentation,
                                 self.annotations or field.annotations)
             self._add_field(newfield)
@@ -265,122 +360,76 @@ class Projection(object):
     def _add_field(self, newfield):
         self.resolved_fields.append(newfield)
 
-class ProjectionSource(object):
-    """
-    Describes the left hand side of a projection.  The LHS contains the "source field path",
-    target name.
-    """
-    def __init__(self, source_field_path, target_name = None):
-        """Creates a projection.
-        Arguments:
-        source_field_path   --  A FieldPath instance that contains the field path to the source field as well 
-                                as any child field selectors if any.
-        target_name         --  Specifies whether the field projected from the source path is to be renamed.  
-                                If None then the same name as the source field path is used.
-        """
-        self.field_path = source_field_path
-        self.name = target_name
+    @property
+    def resolved_type(self):
+        if self.projection_type == PROJECTION_TYPE_STREAMING:
+            return self._resolved_type
+        else:
+            return self.target_type
 
-    def resolve(self, registry, parent_record):
-        self.parent_record = parent_record
-        self.starting_record, self.source_field = self._resolve_source_field()
-
-    def _resolve_source_field(self):
-        """
-        This is the tricky bit.  Given our current field path, we need to find the source type and field within 
-        the type that this field path corresponds to.
-        """
-        record_data = self.parent_record.type_data
-        if not record_data.has_sources:
-            # If we have no sources then there is nothing to resolve so the field path must
-            # be referring to a "new" field
-            return None, None
-
-        if record_data.source_count > 1:
-            raise errors.TLException("Multiple source derivation not yet supported")
-
-        starting_record = record_data.source_records[0].record_type
-        if self.field_path.is_absolute:
-            starting_record = record_data.root_record.source_records[0].record_type
-
-        # resolve the field path from the starting record
-        final_type = starting_record
-        final_field = None
-        for i in xrange(0, self.field_path.length):
-            part = self.field_path.get(i)
-            if final_type.constructor != "record":
-                # Cannot be resolved as the ith part from the source_record is NOT of type record
-                # so we cannot go any further
-                return starting_record, None
-            fields = final_type.type_data.fields
-            if part not in fields:
-                return starting_record, None
-            final_field = fields[part]
-            final_type = final_field.field_type
-
-        return starting_record, final_field
-
-class ProjectionTarget(object):
-    """
-    Describes the right hand side of a projection.  The RHS contains type stream or record mutation declaration
-    as well as the projection's default value and optionality settings.
-    target name.
-    """
-    def __init__(self, target_type = None, is_optional = None, default_value = None):
-        """Creates a projection target.
-       Arguments:
-        target_type         --  Specifies whether the field is to be re-typed in the destination record.
-        is_optional         --  Whether the field is optional.  
-                                    If True/False field is optional or required.
-                                    If None then this value is derived from the source field.
-        default_value       --  Default value of the field.  If None, then the value is the default_value 
-                                of the source field.
-        """
-
-        # Two issues to consider:
-        # 1. Matter of scopes - ie how variables names or names in general are bound to?  Should scopes just be 
-        #    dicts or should we have "scope providers" where records and projections all participate?
-        # 2. Should any kind of type change just be a function that creates a new type given the current
-        #    lexical scope?
-        self.target_type = target_type
-        self.is_optional = is_optional
-        self.default_value = default_value
-        self.type_change_type = TYPE_CHANGE_NONE
-        if target_type:
-            self.type_change_type = TYPE_CHANGE_RETYPE
-
-    def resolve(self, registry, parent_record, projection):
-        source = projection.source
-        source_field = source.source_field
-        if self.type_change_type == TYPE_CHANGE_MUTATION:
+    def resolve_target(self, registry):
+        field_path = self.field_path
+        source_field = self.source_field
+        parent_entity = self.parent_entity
+        if self.projection_type == PROJECTION_TYPE_MUTATION:
             if self.target_type is None:
                 raise errors.TLException("Record MUST be specified on a mutation")
 
-            if source.field_path.has_children or len(projection.resolved_fields) > 1:
+            if field_path and field_path.has_children or len(self.resolved_fields) > 1:
                 raise errors.TLException("Record mutation cannot be applied when selecting multiple fields")
 
-            parent_fqn = parent_record.type_data.fqn
+            # The parent fqn is required because the new record name is based on that.
+            # The projection can be in two forms:
+            if type(parent_entity) is core.Type:
+                # 1. Inside a record or another type
+                parent_fqn = parent_entity.type_data.fqn
+            else:
+                # 2. Inside another projection - ie within a type streaming declaration
+                assert self.parent_entity.projection_type == PROJECTION_TYPE_STREAMING
+                parent_fqn = parent_entity.source_field.fqn
+
             if not parent_fqn:
                 # Parent name MUST be set otherwise it means parent resolution would have failed!
                 raise errors.TLException("Parent record name not set.  May be it is not yet resolved?")
 
-            field_name = projection.resolved_fields[0].name
-            if not field_name:
-                raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
+            if self.resolved_fields:
+                field_name = self.resolved_fields[0].name
+                if not field_name:
+                    raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
 
-            field_type = projection.resolved_fields[0].field_type
-            if not field_type:
-                raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
+                field_type = self.resolved_fields[0].field_type
+                if not field_type:
+                    raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
 
-            if field_type.constructor != "record":
-                raise errors.TLException("Cannot mutate a type that is not a record.  Yet")
+                if field_type.constructor != "record":
+                    raise errors.TLException("Cannot mutate a type that is not a record.  Yet")
+            else:
+                assert self.parent_entity.projection_type == PROJECTION_TYPE_STREAMING
+                proj_index = parent_entity.target_type.projections.index(self)
+                field_name = "_ta__%d" % proj_index
 
             if self.target_type.type_data.fqn is None:
                 parent_name,ns,parent_fqn = utils.normalize_name_and_ns(parent_fqn, None)
                 self.target_type.type_data.fqn = parent_fqn + "_" + field_name
-                self.target_type.type_data.add_source_record(source_field.field_type.type_data.fqn, source_field.field_type)
+                ipdb.set_trace()
+                self.target_type.type_data.parent_entity = self
+                if source_field:
+                    self.target_type.type_data.add_source_record(source_field.field_type.type_data.fqn, source_field.field_type)
                 if not self.target_type.resolve(registry):
                     raise errors.TLException("Could not resolve record mutation for field '%s' in record '%s'" % (field_name, parent_fqn))
+        elif self.projection_type == PROJECTION_TYPE_STREAMING:
+            # Here we have to resolve target of the streamed type.
+            # Do this by resolving each of the projections into a child type and create a constructed
+            # type with these child types as the arguments.
+
+            # TODO: Create a second registry here that contains the bindings so that we know which "new" types are to be 
+            #       used temporarily in a hierarchical fashion.
+            # TODO: Investigate what "hints" can be added to this projection that directly refers to child entries
+            #       that can be used to do getters/setters
+            for index,proj in enumerate(self.target_type.projections):
+                proj.resolve(registry)
+            child_types = [ proj.resolved_type for proj in self.target_type.projections ]
+            self._resolved_type = core.Type(self.constructor, None, *child_types)
 
 class FieldPath(object):
     def __init__(self, parts, selected_children = None):
@@ -428,7 +477,13 @@ class FieldPath(object):
         return self._parts[index]
 
     @property
+    def is_blank(self):
+        return len(self._parts) == 0
+
+    @property
     def is_absolute(self):
+        if len(self._parts) == 0:
+            ipdb.set_trace()
         return self._parts[0] == ""
 
     @property
@@ -489,7 +544,7 @@ class Field(object):
         return result
 
     def copy(self):
-        out = Field(self.name, self.field_type, self.record, self.target.is_optional, self.target.default_value, self.documentation, self.annotations)
+        out = Field(self.name, self.field_type, self.record, self.is_optional, self.default_value, self.documentation, self.annotations)
         out.errors = self.errors 
         return out
 
@@ -497,8 +552,8 @@ class Field(object):
         self.name = another.name
         self.field_type = another.field_type
         self.record = another.record
-        self.target.is_optional = another.is_optional
-        self.target.default_value = another.default_value
+        self.is_optional = another.is_optional
+        self.default_value = another.default_value
         self.documentation = another.documentation
         self.errors = another.errors
         self.annotations = another.annotations
@@ -554,3 +609,75 @@ class TypeStreamDeclaration(object):
         self.constructor = constructor_fqn
         self.param_names = param_names or []
         self.projections = projections
+
+class PathResolver(object):
+    """
+    PathResolver interface resolvers need to do one thing.  They take in a 
+    field path and return three things:
+
+        1. The starting record from which the field path is a valid path.
+        2. The source field nested (at some arbitrary depth) from the starting record
+           that corresponds to the provided field path.
+        3. The final field path that is RELATIVE to the starting record.  Concpetually:
+              starting_record + final_field_path = current_context + input_field_path
+    """
+    def __init__(self, parent_entity):
+        self.parent_entity = parent_entity
+
+    def resolve_path(self, projection, registry):
+        """
+        This is the tricky bit.  Given our current field path, we need to find the source type and field within 
+        the type that this field path corresponds to.
+        """
+        if not projection.field_path:
+            return None, None, None
+
+        field_path = projection.field_path
+        final_field_path = field_path
+
+        if field_path.is_absolute:
+            # then first find the root record
+            starting_record = projection.root_record.source_records[0].record_type.type_data
+            final_field_path = FieldPath(field_path._parts[1:], field_path.selected_children)
+        else:
+            # otherwise get the first type in the parent hierarchy that matches the name first field path part
+            curr_entity = projection.parent_entity
+            starting_record = None
+            while curr_entity:
+                if type(curr_entity) is core.Type:
+                    record_data = curr_entity.type_data
+                    if record_data.source_count > 1:
+                        raise errors.TLException("Multiple source derivation not yet supported")
+                    elif record_data.source_count == 1:
+                        source_record = record_data.source_records[0].record_type.type_data
+                        starting_record, final_field_path = source_record.get_binding(field_path)
+                        if starting_record:
+                            break
+                    curr_entity = record_data.parent_entity
+                elif type(curr_entity) is Projection:
+                    # check for bindings for the first name
+                    starting_record, final_field_path = curr_entity.get_binding(field_path)
+                    if starting_record:
+                        break
+                    curr_entity = record_data.parent_entity
+                else:
+                    assert False
+
+        final_record = starting_record
+        final_field = None
+        if starting_record:
+            # we have something to start off from so see if the full path is viable
+            # resolve the field path from the starting record
+            for i,part in  enumerate(final_field_path._parts):
+                if type(final_record) is not Record:
+                    # Cannot be resolved as the ith part from the source_record is NOT of type record
+                    # so we cannot go any further
+                    return starting_record, None, None
+                if not final_record.is_resolved:
+                    final_record.resolve(registry)
+                fields = final_record.fields
+                if part not in fields:
+                    return starting_record, None, None
+                final_field = fields[part]
+                final_record = final_field.field_type.type_data
+        return starting_record, final_field, final_field_path

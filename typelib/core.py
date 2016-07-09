@@ -4,36 +4,6 @@ import ipdb
 import errors
 from annotations import *
 
-class TypeConstructor(object):
-    def __init__(self, name, arglimit = -1, *argnames):
-        """
-        Creates a new type constructor.
-        
-        Params:
-
-            \name       Name of the type constructor, eg list, set, union etc
-            \arglimit   Maximum number of arguments that can be passed to this type constructor.  If -ve then there are no limits (eg for records, unions and tuples)
-            \argnames   Names of the arguments provided for the arguments.  Not all arguments need to have names.  The first len(argnames) arguments will have names
-                        and rest will be unnamed.
-        """
-        self.name = name
-        self._arglimit = arglimit
-        self.argnames = list(argnames)
-
-    @property
-    def has_arglimit(self):
-        return self._arglimit < 0 or self._arglimit is None
-
-    @property
-    def arglimit(self):
-        return self._arglimit
-
-PairTypeConstructor = TypeConstructor("tuple", 2, "first", "second")
-MapTypeConstructor = TypeConstructor("map", 2, "key", "value")
-ListTypeConstructor = TypeConstructor("map", 1, "value")
-UnionTypeConstructor = TypeConstructor("union", -1)
-RecordTypeConstructor = TypeConstructor("record", -1)
-
 class Type(object):
     def __init__(self, constructor, type_data = None, *type_args):
         self.constructor = constructor
@@ -64,7 +34,7 @@ class Type(object):
     def resolve(self, registry):
         if not self.is_resolved:
             if self.type_data and hasattr(self.type_data, "resolve"):
-                self._resolved = self.type_data.resolve(self, registry)
+                self._resolved = self.type_data.resolve(registry)
         return self.is_resolved
 
     def copy_from(self, another):
@@ -75,7 +45,7 @@ class Type(object):
 
     @property
     def arglimit(self):
-        return len(self.type_args)
+        return len(self.type_args) if self.type_args else 0
 
     def __eq__(self, another):
         return self.constructor == another.constructor  and     \
