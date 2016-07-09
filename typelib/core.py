@@ -32,8 +32,7 @@ class Type(object):
             else:
                 for v in type_args:
                     self.add_child(v)
-
-        self._resolved = False
+        self._resolved = True
 
     def copy_from(self, another):
         self._constructor = another.constructor

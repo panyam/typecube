@@ -619,7 +619,6 @@ class Projection(object):
             if len(missing_fields) > 0:
                 raise errors.TLException("Invalid fields in selection: '%s'" % ", ".join(list(missing_fields)))
         selected_fields = self.field_path.get_selected_fields(starting_record)
-        ipdb.set_trace()
         for field_name in selected_fields:
             newfield = Field(field_name,
                              starting_record.child_type_for(field_name),
