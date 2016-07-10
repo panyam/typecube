@@ -203,11 +203,6 @@ class Type(object):
     def arglimit(self):
         return len(self._child_types) if self._child_types else 0
 
-    def __eq__(self, another):
-        return self.constructor == another.constructor  and     \
-                self.type_data == another.type_data     and     \
-                self.type_args == another.type_args
-
 BooleanType = Type("boolean")
 IntType = Type("int")
 LongType = Type("long")
