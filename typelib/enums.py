@@ -1,5 +1,6 @@
 
 import core
+import utils
 
 def EnumType(enum_data = None):
     out = core.Type("enum", None)
@@ -21,6 +22,14 @@ class EnumData(object):
         self.symbols = list(*symbols)
         self.source_types = []
         self.annotations = []
+
+    @property
+    def name(self):
+        return utils.normalize_name_and_ns(self.fqn, "")[0]
+
+    @property
+    def namespace(self):
+        return utils.normalize_name_and_ns(self.fqn, "")[1]
  
     def signature(self, thetype):
         return "Enum<%s>" % thetype.fqn
