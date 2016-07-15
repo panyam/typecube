@@ -39,6 +39,14 @@ class Record(object):
         self.resolved = True
         self._parent_entity = parent_entity
 
+    @property
+    def name(self):
+        return utils.normalize_name_and_ns(self.fqn, "")[0]
+
+
+    @property
+    def namespace(self):
+        return utils.normalize_name_and_ns(self.fqn, "")[1]
     
     @property
     def fqn(self):
@@ -161,9 +169,9 @@ class Record(object):
         # otherwise all of these are resolved so create our field list from these
         for proj in self.field_projections:
             for field in proj.resolved_fields:
-                self.thetype.add_child(field.field_type, field.name,
+                self.thetype.add_child(field.field_type, field.field_name,
                                        field.docs, field.annotations,
-                                       FieldData(field.name, self.thetype, field.is_optional, field.default_value))
+                                       FieldData(field.field_name, self.thetype, field.is_optional, field.default_value))
 
 
 class FieldPath(object):
@@ -243,22 +251,22 @@ class FieldData(object):
     Holds all information about a field within a record.
     """
     def __init__(self, name, parent_type, optional, default):
-        self.name = name
+        self.field_name = name
         self.parent_type = parent_type
         self.is_optional = optional
         self.default_value = default or None
 
     @property
     def field_type(self):
-        return self.parent_type.child_type_for(self.name)
+        return self.parent_type.child_type_for(self.field_name)
 
     @property
     def docs(self):
-        return self.parent_type.docs_for(self.name)
+        return self.parent_type.docs_for(self.field_name)
 
     @property
     def annotations(self):
-        return self.parent_type.annotations_for(self.name)
+        return self.parent_type.annotations_for(self.field_name)
 
 class Field(object):
     """
@@ -269,7 +277,7 @@ class Field(object):
         if not isinstance(field_type, core.Type):
             ipdb.set_trace()
         assert isinstance(field_type, core.Type), type(field_type)
-        self.name = name or ""
+        self.field_name = name or ""
         self.field_type = field_type
         self.record = record
         self.is_optional = optional
@@ -288,9 +296,9 @@ class Field(object):
     @property
     def fqn(self):
         if self.record.type_data.fqn:
-            return self.record.type_data.fqn + "." + self.name
+            return self.record.type_data.fqn + "." + self.field_name
         else:
-            return self.name
+            return self.field_name
 
     def __hash__(self):
         return hash(self.fqn)
@@ -298,16 +306,16 @@ class Field(object):
     def __cmp__(self, other):
         result = cmp(self.record, other.record)
         if result == 0:
-            result = cmp(self.name, other.name)
+            result = cmp(self.field_name, other.field_name)
         return result
 
     def copy(self):
-        out = Field(self.name, self.field_type, self.record, self.is_optional, self.default_value, self.docs, self.annotations)
+        out = Field(self.field_name, self.field_type, self.record, self.is_optional, self.default_value, self.docs, self.annotations)
         out.errors = self.errors 
         return out
 
     def copyfrom(self, another):
-        self.name = another.name
+        self.field_name = another.field_name
         self.field_type = another.field_type
         self.record = another.record
         self.is_optional = another.is_optional
@@ -506,7 +514,7 @@ class Projection(object):
                 if self.default_value:
                     default_value = self.default_value
 
-                newfield = Field(self.target_name or self.final_field_data.name,
+                newfield = Field(self.target_name or self.final_field_data.field_name,
                                  target_type,
                                  self.parent_entity,
                                  is_optional,
@@ -563,7 +571,7 @@ class Projection(object):
                 # 2. Inside another projection - ie within a type streaming declaration
                 assert parent_entity.projection_type == PROJECTION_TYPE_STREAMING
                 assert type(parent_entity.parent_entity) is core.Type
-                field_name = parent_entity.target_name or parent_entity.final_field_data.name
+                field_name = parent_entity.target_name or parent_entity.final_field_data.field_name
                 parent_fqn = parent_entity.parent_entity.type_data.fqn + "_" + field_name
 
             if not parent_fqn:
@@ -571,7 +579,7 @@ class Projection(object):
                 raise errors.TLException("Parent record name not set.  May be it is not yet resolved?")
 
             if self.resolved_fields:
-                field_name = self.resolved_fields[0].name
+                field_name = self.resolved_fields[0].field_name
                 if not field_name:
                     raise errors.TLException("Source field name is not set.  May be it is not yet resolved?")
 

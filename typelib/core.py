@@ -51,10 +51,35 @@ class Type(object):
             self.type_data.thetype = self
 
     @property
+    def name(self):
+        if self.type_data and hasattr(self.type_data, "name"):
+            return self.type_data.name
+        return self.constructor
+
+    @property
+    def namespace(self):
+        if self.type_data and hasattr(self.type_data, "namespace"):
+            return self.type_data.namespace
+        return ""
+
+    @property
+    def fqn(self):
+        if self.type_data and hasattr(self.type_data, "fqn"):
+            return self.type_data.fqn
+        return self.constructor
+
+    @property
     def child_names(self):
         if not self._is_named:
             raise errors.TLException("Cannot get child type names for unnamed children")
         return self._child_names[:]
+
+    @property
+    def children(self):
+        if not self._is_named:
+            return self._child_types[:]
+        else:
+            return zip(self._child_names, self._child_types)
 
     def index_for(self, name):
         if self._child_names:
