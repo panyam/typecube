@@ -2,8 +2,8 @@
 import core
 import utils
 
-def EnumType(enum_data = None):
-    out = core.Type("enum", None)
+def EnumType(enum_data = None, annotations = None, docs = None):
+    out = core.Type("enum", None, annotations = annotations, docs = docs)
     out.type_data = enum_data or EnumData()
     return out
 

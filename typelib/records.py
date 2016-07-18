@@ -4,8 +4,8 @@ import errors
 import core
 import ipdb
 
-def RecordType(record_data = None):
-    out = core.Type("record", {})
+def RecordType(record_data = None, annotations = None, docs = None):
+    out = core.Type("record", {}, annotations = annotations, docs = docs)
     record_data = record_data or Record(None, out, None)
     record_data.thetype = out
     out.type_data = record_data

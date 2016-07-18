@@ -16,8 +16,6 @@ class TypeRegistry(object):
     def __init__(self, parent_registry = None):
         self.parent = parent_registry
         self.type_cache = {}
-        self.type_annotations = {}
-        self.type_docstrings = {}
         self._resolution_handlers = []
 
         # register default types
@@ -51,7 +49,7 @@ class TypeRegistry(object):
             raise errors.TLException("Type '%s' not found" % fqn)
         return out
 
-    def register_type(self, fqn, newtype, annotations = None, docstring = ""):
+    def register_type(self, fqn, newtype):
         """
         Register's a new type into the registry.  The type can be Unresolved
         if need be.  If a type already exists and is a resolved type, then 
@@ -79,24 +77,7 @@ class TypeRegistry(object):
             else:
                 self.type_cache[fqn] = core.Type(None)
                 self.type_cache[fqn].set_resolved(False)
-        self.type_annotations[fqn] = annotations or []
-        self.type_docstrings[fqn] = docstring
         return self.type_cache[fqn]
-
-    def merge_from(self, another):
-        """
-        Merges the contents of another type registry into this one.
-
-        If the same type exists in both registries, then following rules are applied
-        (assuming T1 in self and T2 in another having the same fqn):
-        * If T2 is unresolved, T2 is dropped.
-        * otherwise:
-        *   If T1 is unresolved and T2 is resolved, T1 is replaced by T2.
-        *   If T1 is resolved and has same type as T2 then all is fine and T2 is dropped (due to equavalency).
-        *   Otherwise a TypeConflict exception is thrown.
-        """
-        # TBD
-        None.a = 3
 
     @property
     def resolved_types(self):

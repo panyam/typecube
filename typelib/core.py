@@ -5,9 +5,10 @@ import errors
 from annotations import *
 
 class Type(object):
-    def __init__(self, constructor, type_args = None):
+    def __init__(self, constructor, type_args = None, annotations = None, docs = ""):
         self._constructor = constructor
-        self.docs = ""
+        self.docs = docs or ""
+        self.annotations = annotations or []
 
         # Documentation for each of the child types
         self._child_docs = []
@@ -44,6 +45,7 @@ class Type(object):
         self._child_annotations = another._child_annotations[:]
         self._resolved = another._resolved
         self.docs = another.docs
+        self.annotations = another.annotations[:]
         self.type_data = another.type_data
         # TODO: This is hacky - how do we ensure that all type_data objects 
         # have a reference back to the Type object that refers to it???
@@ -235,23 +237,26 @@ FloatType = Type("float")
 DoubleType = Type("double")
 StringType = Type("string")
 
-def FixedType(size):
-    out = Type("fixed")
+def FixedType(size, annotations = None, docs = None):
+    out = Type("fixed", annotations = annotations, docs = docs)
     out.type_data = size
     return out
 
-def UnionType(*child_types):
-    return Type("union", list(child_types))
+def UnionType(child_types, annotations = None, docs = None):
+    assert type(child_types) is list
+    return Type("union", child_types, annotations = annotations, docs = docs)
 
-def TupleType(*child_types):
-    return Type("tuple", list(child_types))
+def TupleType(child_types, annotations = None, docs = None):
+    assert type(child_types) is list
+    return Type("tuple", child_types, annotations = annotations, docs = docs)
 
-def ListType(value_type):
-    return Type("list", [value_type])
+def ListType(value_type, annotations = None, docs = None):
+    assert value_type is not None
+    return Type("list", [value_type], annotations = annotations, docs = docs)
 
-def SetType(value_type):
-    return Type("set", [value_type])
+def SetType(value_type, annotations = None, docs = None):
+    return Type("set", [value_type], annotations = annotations, docs = docs)
 
-def MapType(key_type, value_type):
-    return Type("map", [key_type, value_type])
+def MapType(key_type, value_type, annotations = None, docs = None):
+    return Type("map", [key_type, value_type], annotations = annotations, docs = docs)
 
