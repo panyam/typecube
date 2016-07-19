@@ -192,6 +192,12 @@ class Type(object):
         self._child_annotations.append(annotations or [])
         self._child_data.append(child_data or [])
 
+    def get_annotation(self, name):
+        for annotation in self.annotations:
+            if annotation.name == name:
+                return annotation
+        return None
+
     @property
     def constructor(self):
         return self._constructor

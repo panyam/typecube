@@ -3,6 +3,10 @@ class Annotation(object):
     def __init__(self, fqn):
         self.fqn = fqn
 
+    @property
+    def name(self):
+        return self.fqn
+
     def __repr__(self):
         return "<Annotation(0x%x), Name: %s" % (id(self), self.fqn)
 
@@ -28,3 +32,9 @@ class CompoundAnnotation(Annotation):
 
     def __repr__(self):
         return "<CompoundAnnotation(0x%x), Name: %s, Values: %s" % (id(self), self.fqn, ", ".join(["[%s=%s]" % (x,y) for x,y in self.param_specs]))
+
+    def value_of(self, name):
+        for param,value in self.param_specs:
+            if param == name:
+                return value
+        return None
