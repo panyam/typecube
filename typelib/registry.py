@@ -26,6 +26,10 @@ class TypeRegistry(object):
         self.register_type("boolean", core.BooleanType)
         self.register_type("string", core.StringType)
 
+    @property
+    def parent_registry(self):
+        return self.parent
+
     def has_type(self, fqn):
         """
         Returns True if a type exists for the given fully qualified name, 
@@ -44,7 +48,7 @@ class TypeRegistry(object):
         if fqn in self.type_cache:
             out = self.type_cache[fqn]
         elif self.parent:
-            out = self.parent.get_type(fqn, nowthrow = True)
+            out = self.parent.get_type(fqn, nothrow = True)
         if not out and not nothrow:
             raise errors.TLException("Type '%s' not found" % fqn)
         return out
