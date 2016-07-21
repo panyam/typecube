@@ -472,6 +472,17 @@ class Projection(object):
 
         if self.field_path:
             self.resolve_source_fields(registry)
+
+            # ensure that all the resolved fields have their types resolved otherwise 
+            # we cannot load those types
+            if str(self.field_path) == "yearFounded":
+                ipdb.set_trace()
+            for resolved_field in self.resolved_fields:
+                resolved_field.field_type.resolve(registry)
+                if not resolved_field.field_type.is_resolved:
+                    ipdb.set_trace()
+                    raise errors.TLException("Unable to resolve type of field: %s.%s (%s)" % (resolved_field.record.fqn, resolved_field.field_name))
+
             final_field_data = self.final_field_data
             starting_record = self.starting_record
             # Once fields are created, check for the streaming and other field type constraints
@@ -599,6 +610,8 @@ class Projection(object):
                 self.target_type.type_data.fqn = parent_fqn + "_" + field_name
                 assert self.target_type.type_data.parent_entity is not None
                 if final_field_data:
+                    if not final_field_data.field_type.type_data:
+                        ipdb.set_trace()
                     self.target_type.type_data.add_source_record(final_field_data.field_type.type_data.fqn, final_field_data.field_type)
                 if not self.target_type.resolve(registry):
                     raise errors.TLException("Could not resolve record mutation for field '%s' in record '%s'" % (field_name, parent_fqn))
