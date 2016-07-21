@@ -619,6 +619,8 @@ class Projection(object):
                 field_name = "_ta__%d" % proj_index
 
             if self.target_type.type_data.fqn is None:
+                # Should we ever be here?
+                ipdb.set_trace()
                 parent_name,ns,parent_fqn = utils.normalize_name_and_ns(parent_fqn, None)
                 self.target_type.type_data.fqn = parent_fqn + "_" + field_name
                 assert self.target_type.type_data.parent_entity is not None
