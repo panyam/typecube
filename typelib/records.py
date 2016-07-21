@@ -475,13 +475,11 @@ class Projection(object):
 
             # ensure that all the resolved fields have their types resolved otherwise 
             # we cannot load those types
-            if str(self.field_path) == "yearFounded":
-                ipdb.set_trace()
             for resolved_field in self.resolved_fields:
                 resolved_field.field_type.resolve(registry)
                 if not resolved_field.field_type.is_resolved:
                     ipdb.set_trace()
-                    raise errors.TLException("Unable to resolve type of field: %s.%s (%s)" % (resolved_field.record.fqn, resolved_field.field_name))
+                    raise errors.TLException("Unable to resolve type of field: %s.%s" % (resolved_field.record.fqn, resolved_field.field_name))
 
             final_field_data = self.final_field_data
             starting_record = self.starting_record
@@ -503,6 +501,7 @@ class Projection(object):
         # This should give us the field that will be copied to here.
         self.starting_record, self.final_field_data, self.final_field_path = self.path_resolver.resolve_path(self, registry)
 
+        print "Resolving FieldPath: ", self.field_path
         if self.final_field_data:
             final_field_data = self.final_field_data
             if self.field_path.has_children:
@@ -525,6 +524,20 @@ class Projection(object):
                 if self.default_value:
                     default_value = self.default_value
 
+                # Assign target_type name from parent and field name if it is missing
+                if target_type and target_type.fqn is None and target_type.constructor == "record":
+                    parent_fqn = self.parent_entity.fqn
+                    field_name = self.final_field_data.field_name
+                    parent_name,ns,parent_fqn = utils.normalize_name_and_ns(parent_fqn, None)
+                    self.target_type.type_data.fqn = parent_fqn + "_" + field_name
+                    assert self.target_type.type_data.parent_entity is not None
+                    if final_field_data:
+                        if final_field_data.field_type.constructor != "record" or not final_field_data.field_type.type_data:
+                            raise errors.TLException("'%s' is not of a record type but is being using in a mutation for field '%s'" % (final_field_data.field_type.fqn, field_name))
+                        self.target_type.type_data.add_source_record(final_field_data.field_type.type_data.fqn, final_field_data.field_type)
+                    if not self.target_type.resolve(registry):
+                        raise errors.TLException("Could not resolve record mutation for field '%s' in record '%s'" % (field_name, parent_fqn))
+
                 newfield = Field(self.target_name or self.final_field_data.field_name,
                                  target_type,
                                  self.parent_entity,
@@ -538,7 +551,6 @@ class Projection(object):
             # The Interesting case.  source field could not be found or resolved.
             # There is a chance that this is a "new" field.  That will only be the case if field path has a single entry
             # and target name is not provided and we are not a type stream
-            print "FieldPath: ", self.field_path
             if self.field_path.has_children:
                 if self.field_path.length == 0 and starting_record != None:
                     # then we are starting from the root itself of the starting record as "multiple" entries
@@ -566,6 +578,7 @@ class Projection(object):
         field_path = self.field_path
         final_field_data = self.final_field_data
         parent_entity = self.parent_entity
+
         if self.projection_type == PROJECTION_TYPE_MUTATION:
             if self.target_type is None:
                 raise errors.TLException("Record MUST be specified on a mutation")
