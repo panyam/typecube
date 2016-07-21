@@ -237,6 +237,7 @@ class Type(object):
         return len(self._child_types) if self._child_types else 0
 
 BooleanType = Type("boolean")
+ByteType = Type("byte")
 IntType = Type("int")
 LongType = Type("long")
 FloatType = Type("float")

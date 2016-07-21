@@ -19,11 +19,12 @@ class TypeRegistry(object):
         self._resolution_handlers = []
 
         # register default types
+        self.register_type("boolean", core.BooleanType)
+        self.register_type("byte", core.ByteType)
         self.register_type("int", core.IntType)
         self.register_type("long", core.LongType)
         self.register_type("float", core.FloatType)
         self.register_type("double", core.DoubleType)
-        self.register_type("boolean", core.BooleanType)
         self.register_type("string", core.StringType)
 
     @property
