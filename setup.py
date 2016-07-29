@@ -32,6 +32,7 @@ version = __import__('typelib').get_version()
 setup(
     name='typelib',
     version=version,
+    requires = ["enum34", "ipdb", "wheel" ],
     url='https://github.com/panyam/typelib',
     author='Sriram Panyam',
     author_email='sri.panyam@gmail.com',
