@@ -37,6 +37,7 @@ setup(
     author='Sriram Panyam',
     author_email='sri.panyam@gmail.com',
     description=("Utilities and library to model types and type systems"),
+    zip_safe = False,
     license='BSD',
     packages=find_packages(exclude=EXCLUDE_FROM_PACKAGES),
     include_package_data=True,
