@@ -2,7 +2,6 @@
 
 import ipdb
 import errors
-from annotations import *
 
 class Type(object):
     def __init__(self, constructor, type_args = None, annotations = None, docs = ""):

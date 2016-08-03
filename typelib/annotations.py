@@ -1,3 +1,17 @@
+import ipdb
+
+class Annotations(object):
+    """
+    Keeps track of annotations.
+    """
+    def __init__(self, annotations = []):
+        self.all_annotations = annotations
+
+    def has(self, name):
+        for a in self.all_annotations:
+            if a.name == name:
+                return True
+        return False
 
 class Annotation(object):
     def __init__(self, fqn):
