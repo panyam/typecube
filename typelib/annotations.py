@@ -1,4 +1,5 @@
 import ipdb
+from collections import defaultdict
 
 class Annotations(object):
     """
@@ -13,46 +14,80 @@ class Annotations(object):
                 return True
         return False
 
+    def get(self, name):
+        """
+        Get the annotation by a given name.
+        """
+        for a in self.all_annotations:
+            if a.name == name:
+                return a
+        return None
+
+    def get_all(self, name):
+        """
+        Get all the annotation by a given name.
+        """
+        return [annot for annot in self.all_annotations if annot.name == name]
+
 class Annotation(object):
-    def __init__(self, fqn):
+    def __init__(self, fqn, value = None, param_specs = None):
         self.fqn = fqn
+        self._value = value
+        self._param_specs = defaultdict(list)
+        speciter = param_specs or []
+        if type(param_specs) is dict:
+            speciter = param_specs.iteritems()
+        for k,v in speciter:
+            self._param_specs[k].append(v)
 
     @property
     def name(self):
         return self.fqn
 
-    def __repr__(self):
-        return "<Annotation(0x%x), Name: %s" % (id(self), self.fqn)
-
-class SimpleAnnotation(Annotation):
-    def __init__(self, fqn):
-        super(SimpleAnnotation, self).__init__(fqn)
-
-    def __repr__(self):
-        return "<SimpleAnnotation(0x%x), Name: %s" % (id(self), self.fqn)
-
-class PropertyAnnotation(Annotation):
-    def __init__(self, fqn, value):
-        super(PropertyAnnotation, self).__init__(fqn)
-        self.value = value
-
-    def __repr__(self):
-        return "<PropertyAnnotation(0x%x), Name: %s, Value: %s" % (id(self), self.fqn, str(self.value))
-
-class CompoundAnnotation(Annotation):
-    def __init__(self, fqn, param_specs):
-        super(CompoundAnnotation, self).__init__(fqn)
-        self.param_specs = param_specs
-
-    def __repr__(self):
-        return "<CompoundAnnotation(0x%x), Name: %s, Values: %s" % (id(self), self.fqn, ", ".join(["[%s=%s]" % (x,y) for x,y in self.param_specs]))
+    @property
+    def has_value(self):
+        return self._value is not None
 
     @property
-    def kw_arguments(self):
-        return dict(self.param_specs)
+    def has_params(self):
+        return self._param_specs is not None and len(self._param_specs) > 0
 
-    def value_of(self, name):
-        for param,value in self.param_specs:
-            if param == name:
-                return value
+    def has_param(self, name):
+        return name in self._param_specs and len(self._param_specs[name]) > 0
+
+    @property
+    def params(self):
+        return self._param_specs or {}
+
+    @property
+    def value(self):
+        if self._value:
+            return self._value
+        elif self._param_specs:
+            return dict
+
+    def values_of(self, name):
+        """
+        Return all values of a param
+        """
+        if name in self._param_specs:
+            return self._param_specs[name]
         return None
+
+    def first_value_of(self, name):
+        """
+        Return the first value of a particular param by name if it exists otherwise false.
+        """
+        vals = self.values_of(name)
+        if vals is not None:
+            return vals[0]
+        return None
+
+    def __repr__(self):
+        out = "<Annotation(0x%x), Name: %s" % (id(self), self.fqn)
+        if self._value:
+            out += ", Value: %s" % str(self._value)
+        if self._param_specs:
+            out += ", Args: (%s)" % ", ".join(["[%s=%s]" % (x,y) for x,y in self._param_specs])
+        out += ">"
+        return out
