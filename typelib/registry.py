@@ -15,7 +15,6 @@ class TypeRegistry(object):
     """
     def __init__(self, parent_registry = None):
         self.parent = parent_registry
-        self._derivations = {}
         self.type_cache = {}
         self._resolution_handlers = []
 
@@ -159,13 +158,3 @@ class TypeRegistry(object):
             print "==============================="
             for type_list, _ in self._resolution_handlers:
                 print "(%s)" % (", ".join([x.fqn for x in type_list]))
-
-    @property
-    def all_derivations(self):
-        return self._derivations.values()
-
-
-    def register_derivation(self, derivation):
-        if derivation.fqn in self._derivations:
-            raise errors.TLException("Duplicate derivation found: " % derivation.fqn)
-        self._derivations[derivation.fqn] = derivation
