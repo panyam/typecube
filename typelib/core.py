@@ -235,6 +235,28 @@ class Type(object):
     def arglimit(self):
         return len(self._child_types) if self._child_types else 0
 
+class TypeReference(object):
+    """
+    Keeps track of any time a type is referenced.  Instead of referencing types directly it is beneficial to refer to them via this 
+    proxy object so that other data could be maintained about the association.
+    """
+    def __init__(self, thetype):
+        self._thetype = thetype
+        self.docs = docs or ""
+
+    def get_annotation(self, name):
+        for annotation in self._annotations:
+            if annotation.name == name:
+                return annotation
+        return None
+
+    @property
+    def target_type(self):
+        """
+        The target type being referenced by this object.
+        """
+        return self._thetype
+
 BooleanType = Type("boolean")
 ByteType = Type("byte")
 IntType = Type("int")

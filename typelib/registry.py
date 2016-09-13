@@ -80,7 +80,7 @@ class TypeRegistry(object):
             if newtype is not None:
                 self.type_cache[fqn] = newtype
             else:
-                self.type_cache[fqn] = core.Type(None)
+                self.type_cache[fqn] = core.Type(fqn)
                 self.type_cache[fqn].set_resolved(False)
         return self.type_cache[fqn]
 
