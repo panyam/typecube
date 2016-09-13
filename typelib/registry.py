@@ -66,12 +66,17 @@ class TypeRegistry(object):
             False if a type with the given fqn already exists.
         """
 
+        if fqn is None:
+            ipdb.set_trace()
         if fqn in self.type_cache:
+            existing_type = self.type_cache[fqn]
+            if existing_type == newtype:
+                return existing_type
             # ensure current one is unresolved otherwise throw an error
-            if self.type_cache[fqn].is_resolved:
+            elif existing_type.is_resolved:
                 raise errors.DuplicateTypeException(fqn)
             elif newtype is not None:
-                self.type_cache[fqn].copy_from(newtype)
+                existing_type.copy_from(newtype)
             else:
                 # Do nothing when current type is unresolved and newtype is None
                 # we wanted to create an unresolved type at this point anyway
