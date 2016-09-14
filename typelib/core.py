@@ -197,6 +197,9 @@ class Type(object):
                 return annotation
         return None
 
+    def has_annotation(self, name):
+        return self.get_annotation(name) is not None
+
     @property
     def constructor(self):
         return self._constructor
