@@ -66,8 +66,9 @@ class TypeRegistry(object):
             False if a type with the given fqn already exists.
         """
 
-        if fqn is None:
-            ipdb.set_trace()
+        if fqn is None and newtype:
+            newtype.set_resolved(False)
+        assert fqn is not None
         if fqn in self.type_cache:
             existing_type = self.type_cache[fqn]
             if existing_type == newtype:

@@ -68,15 +68,15 @@ if overlay_warning:
 WARNING!
 ========
 
-You have just installed Typelang over top of an existing
+You have just installed typelib over top of an existing
 installation, without removing it first. Because of this,
 your install may now include extraneous files from a
 previous version that have since been removed from
-Typelang . This is known to cause a variety of problems. You
+typelib . This is known to cause a variety of problems. You
 should manually remove the
 
 %(existing_path)s
 
-directory and re-install Typelang.
+directory and re-install typelib.
 
 """ % {"existing_path": existing_path})
