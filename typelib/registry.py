@@ -1,5 +1,6 @@
 
 import os
+import fnmatch
 import ipdb
 import json
 import core
@@ -30,6 +31,21 @@ class TypeRegistry(object):
     @property
     def parent_registry(self):
         return self.parent
+
+    def types_for_wildcards(self, wildcards, skip_unresolved = True):
+        """
+        Return all types that match any of the given wild cards.
+        If the skip_unresolved parameter is True then only resolved types
+        are returned.
+        """
+        source_types = set()
+        for tw in wildcards:
+            # First go through all resolved types
+            for fqn,t in self.type_cache.iteritems():
+                if fnmatch.fnmatch(fqn, tw):
+                    if t.is_resolved or not skip_unresolved:
+                        source_types.add(fqn)
+        return source_types
 
     def has_type(self, fqn):
         """
