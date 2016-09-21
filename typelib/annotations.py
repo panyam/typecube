@@ -1,6 +1,26 @@
 import ipdb
 from collections import defaultdict
 
+class Annotatable(object):
+    def __init__(self, annotations = None):
+        self._annotations = annotations or []
+
+    @property
+    def annotations(self):
+        return self._annotations
+
+    def get_annotation(self, name):
+        for annotation in self._annotations:
+            if annotation.name == name:
+                return annotation
+        return None
+
+    def has_annotation(self, name):
+        return self.get_annotation(name) is not None
+
+    def copy_from(self, another):
+        self._annotations = another._annotations[:]
+
 class Annotations(object):
     """
     Keeps track of annotations.

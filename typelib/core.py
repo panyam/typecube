@@ -2,12 +2,13 @@
 
 import ipdb
 import errors
+from typelib.annotations import Annotatable
 
-class Type(object):
+class Type(Annotatable):
     def __init__(self, constructor, type_args = None, annotations = None, docs = ""):
+        Annotatable.__init__(self, annotations)
         self._constructor = constructor
         self.docs = docs or ""
-        self.annotations = annotations or []
 
         # Documentation for each of the child types
         self._child_docs = []
@@ -35,6 +36,7 @@ class Type(object):
         self._resolved = True
 
     def copy_from(self, another):
+        Annotatable.copy_from(self, another)
         self._constructor = another.constructor
         self._is_named = another._is_named
         self._child_types = another._child_types[:]
@@ -44,7 +46,6 @@ class Type(object):
         self._child_annotations = another._child_annotations[:]
         self._resolved = another._resolved
         self.docs = another.docs
-        self.annotations = another.annotations[:]
         self.type_data = another.type_data
         # TODO: This is hacky - how do we ensure that all type_data objects 
         # have a reference back to the Type object that refers to it???
@@ -190,15 +191,6 @@ class Type(object):
         self._child_docs.append(docs or "")
         self._child_annotations.append(annotations or [])
         self._child_data.append(child_data or [])
-
-    def get_annotation(self, name):
-        for annotation in self.annotations:
-            if annotation.name == name:
-                return annotation
-        return None
-
-    def has_annotation(self, name):
-        return self.get_annotation(name) is not None
 
     @property
     def constructor(self):
