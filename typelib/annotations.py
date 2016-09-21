@@ -2,8 +2,9 @@ import ipdb
 from collections import defaultdict
 
 class Annotatable(object):
-    def __init__(self, annotations = None):
+    def __init__(self, annotations = None, docs = ""):
         self._annotations = annotations or []
+        self.docs = docs or ""
 
     @property
     def annotations(self):
@@ -20,6 +21,7 @@ class Annotatable(object):
 
     def copy_from(self, another):
         self._annotations = another._annotations[:]
+        self.docs = another.docs
 
 class Annotations(object):
     """

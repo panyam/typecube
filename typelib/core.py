@@ -6,9 +6,8 @@ from typelib.annotations import Annotatable
 
 class Type(Annotatable):
     def __init__(self, constructor, type_args = None, annotations = None, docs = ""):
-        Annotatable.__init__(self, annotations)
+        Annotatable.__init__(self, annotations, docs)
         self._constructor = constructor
-        self.docs = docs or ""
 
         # Documentation for each of the child types
         self._child_docs = []
@@ -45,7 +44,6 @@ class Type(Annotatable):
         self._child_data = another._child_data[:]
         self._child_annotations = another._child_annotations[:]
         self._resolved = another._resolved
-        self.docs = another.docs
         self.type_data = another.type_data
         # TODO: This is hacky - how do we ensure that all type_data objects 
         # have a reference back to the Type object that refers to it???
