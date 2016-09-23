@@ -7,6 +7,10 @@ from typelib.annotations import Annotatable
 class Type(Annotatable):
     def __init__(self, constructor, type_args = None, annotations = None, docs = ""):
         Annotatable.__init__(self, annotations, docs)
+
+        # If this is set then we have a possible function
+        self.output_type = None
+
         self._constructor = constructor
 
         # Documentation for each of the child types
@@ -197,6 +201,30 @@ class Type(Annotatable):
     def __repr__(self):
         return "<Type, ID: 0x%x, Constructor: %s, Data: %s>" % (id(self), self.constructor, self.type_data)
 
+    def __eq__(self, another):
+        if type(another) is not Type:
+            return False
+
+        if id(self) != id(another):
+            return False
+
+        if self.constructor != another.constructor:
+            return False
+
+        if self.output_type != another.output_type:
+            return False
+
+        if self._is_named != another._is_named:
+            return False
+
+        if self._child_names != another._child_names:
+            return False
+
+        if self._child_types != another._child_types:
+            return False
+
+        return True
+
     @property
     def is_unresolved(self):
         return not self.is_resolved
@@ -271,6 +299,10 @@ def TupleType(child_types, annotations = None, docs = None):
     assert type(child_types) is list
     return Type("tuple", child_types, annotations = annotations, docs = docs)
 
+def ArrayType(value_type, annotations = None, docs = None):
+    assert value_type is not None
+    return Type("array", [value_type], annotations = annotations, docs = docs)
+
 def ListType(value_type, annotations = None, docs = None):
     assert value_type is not None
     return Type("list", [value_type], annotations = annotations, docs = docs)
@@ -281,3 +313,7 @@ def SetType(value_type, annotations = None, docs = None):
 def MapType(key_type, value_type, annotations = None, docs = None):
     return Type("map", [key_type, value_type], annotations = annotations, docs = docs)
 
+def FunctionType(input_types, output_type, annotations = None, docs = ""):
+    out = Type("function", input_types, annotations = annotations, docs = docs)
+    out.output_type = output_type
+    return out
