@@ -1,10 +1,39 @@
 import ipdb
+import traceback
+import pprint
+import cStringIO
 from collections import defaultdict
+
+AS_JSON = False
 
 class Annotatable(object):
     def __init__(self, annotations = None, docs = ""):
         self._annotations = annotations or []
         self.docs = docs or ""
+
+    def __repr__(self):
+        try:
+            json = self.json()
+        except:
+            traceback.print_exc()
+        if AS_JSON:
+            ios = cStringIO.StringIO()
+            pprint.pprint(json, ios)
+            ios.seek(0)
+            return ios.read()
+        else:
+            from yaml import dump
+            return dump(json, default_flow_style = False)
+
+
+    def __json__(self):
+        return {}
+
+    def json(self):
+        out = self.__json__()
+        if "__id__" not in out: out["__id__"] = id(self)
+        if "__cls__" not in out: out["__cls__"] = self.__class__.__name__
+        return out
 
     @property
     def annotations(self):
