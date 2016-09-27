@@ -57,6 +57,10 @@ class Annotations(object):
     Keeps track of annotations.
     """
     def __init__(self, annotations = []):
+        if annotations is None:
+            annotations = []
+        elif type(annotations) is Annotations
+            annotations = annotations.all_annotations
         self.all_annotations = annotations
 
     def has(self, name):
@@ -135,10 +139,11 @@ class Annotation(object):
         return None
 
     def __repr__(self):
+        ipdb.set_trace()
         out = "<Annotation(0x%x), Name: %s" % (id(self), self.fqn)
         if self._value:
             out += ", Value: %s" % str(self._value)
         if self._param_specs:
-            out += ", Args: (%s)" % ", ".join(["[%s=%s]" % (x,y) for x,y in self._param_specs])
+            out += ", Args: (%s)" % ", ".join(["[%s=%s]" % (x,y) for x,y in self._param_specs.iteritems()])
         out += ">"
         return out
