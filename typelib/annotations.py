@@ -59,7 +59,7 @@ class Annotations(object):
     def __init__(self, annotations = []):
         if annotations is None:
             annotations = []
-        elif type(annotations) is Annotations
+        elif type(annotations) is Annotations:
             annotations = annotations.all_annotations
         self.all_annotations = annotations
 
