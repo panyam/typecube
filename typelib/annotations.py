@@ -64,6 +64,9 @@ class Annotations(object):
         self.all_annotations = annotations
 
     def has(self, name):
+        """
+        Returns True if there is atleast one annotation by a given name, otherwise False.
+        """
         for a in self.all_annotations:
             if a.name == name:
                 return True
@@ -71,7 +74,7 @@ class Annotations(object):
 
     def get(self, name):
         """
-        Get the annotation by a given name.
+        Get the first annotation by a given name.
         """
         for a in self.all_annotations:
             if a.name == name:
