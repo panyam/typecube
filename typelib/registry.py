@@ -99,6 +99,7 @@ class TypeRegistry(object):
             if not overwrite:
                 raise errors.DuplicateTypeException(fqn)
             else:
+                print "Overwriting existing type: %s" % fqn
                 if newtype_or_ref:
                     ipdb.set_trace()
                 existing_typeref.target = newtype_or_ref
