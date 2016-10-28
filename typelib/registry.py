@@ -61,7 +61,7 @@ class TypeRegistry(object):
         ipdb.set_trace()
         raise errors.TLException("Reference to type '%s' not found" % fqn)
 
-    def register_type(self, fqn, newtype_or_ref):
+    def register_type(self, fqn, newtype_or_ref, overwrite = False):
         """
         Register's a new type for a given FQN and returns a reference to the type.
         If the type itself is unresolved or needs to be changed it can be done so
@@ -96,7 +96,12 @@ class TypeRegistry(object):
         # ensure current one is unresolved otherwise throw an error
         if existing_typeref.is_resolved:
             # If it is pointing to a valid type then we may have a problem!
-            raise errors.DuplicateTypeException(fqn)
+            if not overwrite:
+                raise errors.DuplicateTypeException(fqn)
+            else:
+                if newtype_or_ref:
+                    ipdb.set_trace()
+                existing_typeref.target = newtype_or_ref
         elif newtype_or_ref is not None:
             existing_typeref.target = newtype_or_ref
         else:
