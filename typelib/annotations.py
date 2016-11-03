@@ -8,6 +8,8 @@ AS_JSON = False
 
 class Annotatable(object):
     def __init__(self, annotations = None, docs = ""):
+        if annotations:
+            assert type(annotations) is Annotations
         self._annotations = annotations or []
         self.docs = docs or ""
 
@@ -63,6 +65,9 @@ class Annotations(object):
             annotations = annotations.all_annotations
         self.all_annotations = annotations
 
+    def __iter__(self):
+        return iter(self.all_annotations)
+
     def has(self, name):
         """
         Returns True if there is atleast one annotation by a given name, otherwise False.
@@ -72,7 +77,7 @@ class Annotations(object):
                 return True
         return False
 
-    def get(self, name):
+    def get_first(self, name):
         """
         Get the first annotation by a given name.
         """
