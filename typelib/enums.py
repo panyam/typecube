@@ -9,7 +9,7 @@ class EnumSymbol(Annotatable):
         self.name = name
 
 def EnumType(symbols = None, annotations = None, docs = None):
-    out = core.Type(None, "enum", None, annotations = annotations, docs = docs)
+    out = core.Type(None, "enum", type_params = None, type_args = None, annotations = annotations, docs = docs)
     out.type_data = symbols
     return out
 
