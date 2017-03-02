@@ -29,7 +29,7 @@ if "install" in sys.argv:
 EXCLUDE_FROM_PACKAGES = [ ]
 
 def get_version():
-    with open('priorityq/__init__.py', 'rb') as f:
+    with open('typelib/__init__.py', 'rb') as f:
         _version_re = re.compile(r'__version__\s+=\s+(.*)')
         return str(ast.literal_eval(_version_re.search(f.read().decode('utf-8')).group(1)))
 
