@@ -6,10 +6,12 @@ from typelib.annotations import Annotatable
 
 class TypeParam(Annotatable):
     """
-    The label of a parameter used in a parametrized type.
+    The reference to a parameter to a type.  Currently has the label associated with the type as well as the
+    parent type.
     """
-    def __init__(self, label, annotations = None, docs = ""):
+    def __init__(self, parent_type, label, annotations = None, docs = ""):
         Annotatable.__init__(self, annotations, docs)
+        self.parent_type = parent_type
         self.label = label
 
 class TypeArg(Annotatable):
@@ -261,7 +263,3 @@ def MapType(key_typeref, value_typeref, annotations = None, docs = None):
     out = Type(None, "map", type_params = None, type_args = [key_typeref, value_typeref], annotations = annotations, docs = docs)
     return out
 
-def FunctionType(input_typerefs, output_typeref, annotations = None, docs = ""):
-    out = Type(None, "function", type_params = None, type_args = input_typerefs, annotations = annotations, docs = docs)
-    out.output_typeref = output_typeref
-    return out
