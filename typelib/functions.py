@@ -3,12 +3,13 @@ import ipdb
 from typelib import utils as tlutils
 from typelib import core as tlcore
 
-def FunctionType(input_params, output_typeref, annotations = None, docs = ""):
-    out = Type(None, "function", type_params = None, type_args = input_typerefs, annotations = annotations, docs = docs)
+def FunctionType(input_params, output_typeref, annotations = None, docs = "", name = None):
+    out = tlcore.Type(None, "function", type_params = None, type_args = input_params,
+                      annotations = annotations, docs = docs, name = name)
     out.output_typeref = output_typeref
     return out
 
-class FunctionTypeArg(tlcore.TypeArg):
+class ParamTypeArg(tlcore.TypeArg):
     """Holds all information about a function's parameter. """
     def __init__(self, name, param_typeref, is_optional, default_value, annotations = None, docs = ""):
         if name and type(name) not in (str, unicode):
@@ -27,5 +28,5 @@ class FunctionTypeArg(tlcore.TypeArg):
         return self.typeref.first_type
 
     def __json__(self):
-        out = super(FieldTypeArg, self).__json__()
+        out = super(ParamTypeArg, self).__json__()
         return out

@@ -44,7 +44,7 @@ class Type(Annotatable):
     like monads that can be defined else where.  The advantage of this is that two types can now
     be checked for equivalency regardless of how they are referenced.
     """
-    def __init__(self, parent_typeref, constructor, type_params, type_args = None, annotations = None, docs = ""):
+    def __init__(self, parent_typeref, constructor, type_params, type_args = None, annotations = None, docs = "", name = None):
         """
         Creates a new type object.
 
@@ -57,6 +57,7 @@ class Type(Annotatable):
             type_args       The child types or the argument types of this type function.
             annotations     Annotations applied to the type.
             docs            Documentation string for the type.
+            name            The name this type was originally created with.
         """
         Annotatable.__init__(self, annotations, docs)
 
@@ -76,9 +77,15 @@ class Type(Annotatable):
 
         self._type_args = []
 
+        self._name = name
+
         if type_args:
             for type_arg in type_args:
                 self.add_arg(type_arg)
+
+    @property
+    def name(self):
+        return self._name
 
     @property
     def parameters(self):
@@ -240,9 +247,9 @@ def FixedType(size, annotations = None, docs = None):
     out.type_data = size
     return out
 
-def UnionType(child_typerefs, annotations = None, docs = None):
+def UnionType(child_typerefs, annotations = None, docs = None, name = None):
     assert type(child_typerefs) is list
-    return Type(None, "union", type_params = None, type_args = child_typerefs, annotations = annotations, docs = docs)
+    return Type(None, "union", type_params = None, type_args = child_typerefs, annotations = annotations, docs = docs, name = name)
 
 def TupleType(child_typerefs, annotations = None, docs = None):
     assert type(child_typerefs) is list

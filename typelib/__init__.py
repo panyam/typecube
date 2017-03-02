@@ -1,9 +1,3 @@
 
-VERSION = (0, 0, 10)
-
-def get_version(version = None):
-    version = version or VERSION
-    return ".".join(map(str, list(version)))
-
-__version__ = get_version(VERSION)
+__version__ = "0.0.8"
 

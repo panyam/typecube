@@ -1,10 +1,12 @@
 #!/usr/bin/env python
-
 import os
+import re
+import ast
 import sys
 from distutils.sysconfig import get_python_lib
 
-from setuptools import find_packages, setup
+from setuptools import find_packages
+from setuptools import setup
 
 # Warn if we are installing over top of an existing installation. 
 overlay_warning = False
@@ -26,14 +28,21 @@ if "install" in sys.argv:
 # Any packages inside the typelib source folder we dont want in the packages
 EXCLUDE_FROM_PACKAGES = [ ]
 
-# Dynamically calculate the version based on typelib.VERSION.
-version = __import__('typelib').get_version()
+def get_version():
+    with open('priorityq/__init__.py', 'rb') as f:
+        _version_re = re.compile(r'__version__\s+=\s+(.*)')
+        return str(ast.literal_eval(_version_re.search(f.read().decode('utf-8')).group(1)))
 
-setup(
-    name='typelib',
-    version=version,
-    requires = ["enum34", "ipdb", "wheel", "PyYaml" ],
-    url='https://github.com/panyam/typelib',
+def get_description():
+    return open("README.rst").read()
+
+setup(name='typelib',
+      version=get_version(),
+      requires = ["enum34", "ipdb", "wheel", "PyYaml" ],
+      extras_require={'docs': ['Sphinx>=1.1']},
+      keywords=['languages', 'type system', 'types'],
+      url='https://github.com/panyam/typelib',
+      long_description=get_description(),
     author='Sriram Panyam',
     author_email='sri.panyam@gmail.com',
     description=("Utilities and library to model types and type systems"),
