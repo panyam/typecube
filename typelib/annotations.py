@@ -28,13 +28,16 @@ class Annotatable(object):
             return dump(json, default_flow_style = False)
 
 
-    def __json__(self):
+    def __json__(self, **kwargs):
         return {}
 
-    def json(self):
-        out = self.__json__()
-        if "__id__" not in out: out["__id__"] = id(self)
-        if "__cls__" not in out: out["__cls__"] = self.__class__.__name__
+    def json(self, **kwargs):
+        out = self.__json__(**kwargs)
+        if not kwargs.get("no_id", False):
+            if "__id__" not in out:
+                out["__id__"] = id(self)
+            if "__cls__" not in out:
+                out["__cls__"] = self.__class__.__name__
         return out
 
     @property

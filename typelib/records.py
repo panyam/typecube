@@ -26,6 +26,3 @@ class FieldTypeArg(tlcore.TypeArg):
     def field_type(self):
         return self.typeref.first_type
 
-    def __json__(self):
-        out = super(FieldTypeArg, self).__json__()
-        return out

@@ -27,10 +27,10 @@ class TypeArg(Annotatable):
             assert False, "Argument must be a TypeRef or a TypeParam"
         self.typeref = typeref_or_param
 
-    def __json__(self):
+    def __json__(self, **kwargs):
         return {
             "name": self.name,
-            "ref": self.typeref.json()
+            "ref": self.typeref.json(**kwargs)
         }
 
     @property
@@ -142,8 +142,13 @@ class Type(Annotatable):
 
         self._type_args.append(arg)
 
-    def __json__(self):
-        return { "cons": self.constructor }
+    def __json__(self, **kwargs):
+        out = {}
+        if not kwargs.get("no_cons", False):
+            out["cons"] = self.constructor
+        if self.name:
+            out["name"] = self.name
+        return out
 
 class TypeRef(Annotatable):
     """
@@ -162,8 +167,8 @@ class TypeRef(Annotatable):
         self._categorise_target(entry)
         self._target = entry
 
-    def __json__(self):
-        target = self._target.__json__() if self._target else None
+    def __json__(self, **kwargs):
+        target = self._target.__json__(**kwargs) if self._target else None
         return {"fqn": self.fqn, "target": target}
 
     def _categorise_target(self, entry):

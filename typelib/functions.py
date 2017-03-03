@@ -26,7 +26,3 @@ class ParamTypeArg(tlcore.TypeArg):
     @property
     def param_type(self):
         return self.typeref.first_type
-
-    def __json__(self):
-        out = super(ParamTypeArg, self).__json__()
-        return out
