@@ -28,10 +28,18 @@ class TypeArg(Annotatable):
         self.typeref = typeref_or_param
 
     def __json__(self, **kwargs):
-        return {
-            "name": self.name,
-            "ref": self.typeref.json(**kwargs)
-        }
+        out = {}
+        if self.name:
+            out["name"] = self.name
+            if self.name == "attachments":
+                ipdb.set_trace()
+        if self.typeref.fqn:
+            out["type"] = self.typeref.fqn
+        else:
+            out["type"] = self.typeref.json(**kwargs)
+        if self.docs:
+            out["docs"] = self.docs
+        return out
 
     @property
     def name(self):
@@ -144,10 +152,12 @@ class Type(Annotatable):
 
     def __json__(self, **kwargs):
         out = {}
-        if not kwargs.get("no_cons", False):
-            out["cons"] = self.constructor
         if self.name:
             out["name"] = self.name
+        if not kwargs.get("no_cons", False):
+            out["type"] = self.constructor
+        if self._type_args:
+            out["args"] = [arg.json(**kwargs) for arg in self._type_args]
         return out
 
 class TypeRef(Annotatable):
@@ -169,7 +179,14 @@ class TypeRef(Annotatable):
 
     def __json__(self, **kwargs):
         target = self._target.__json__(**kwargs) if self._target else None
-        return {"fqn": self.fqn, "target": target}
+        out = {}
+        if self.fqn:
+            return self.fqn
+            # out["fqn"] = {"fqn": self.fqn}
+        if target and len(target) > 0:
+            return target
+            # out["target"] = target
+        return out
 
     def _categorise_target(self, entry):
         self._is_type = isinstance(entry, Type)
