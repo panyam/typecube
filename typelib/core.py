@@ -31,8 +31,6 @@ class TypeArg(Annotatable):
         out = {}
         if self.name:
             out["name"] = self.name
-            if self.name == "attachments":
-                ipdb.set_trace()
         if self.typeref.fqn:
             out["type"] = self.typeref.fqn
         else:
