@@ -16,16 +16,17 @@ class Annotatable(object):
     def __repr__(self):
         try:
             json = self.json()
+            if AS_JSON:
+                ios = cStringIO.StringIO()
+                pprint.pprint(json, ios)
+                ios.seek(0)
+                return ios.read()
+            else:
+                from yaml import dump
+                return dump(json, default_flow_style = False)
         except:
             traceback.print_exc()
-        if AS_JSON:
-            ios = cStringIO.StringIO()
-            pprint.pprint(json, ios)
-            ios.seek(0)
-            return ios.read()
-        else:
-            from yaml import dump
-            return dump(json, default_flow_style = False)
+            return ""
 
 
     def __json__(self, **kwargs):

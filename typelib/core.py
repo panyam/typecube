@@ -35,7 +35,7 @@ class TypeArg(Annotatable):
             out["type"] = self.typeref.fqn
         else:
             out["type"] = self.typeref.json(**kwargs)
-        if self.docs:
+        if kwargs.get("include_docs", False) and self.docs:
             out["docs"] = self.docs
         return out
 
@@ -152,6 +152,8 @@ class Type(Annotatable):
         out = {}
         if self.name:
             out["name"] = self.name
+        if kwargs.get("include_docs", False) and self.docs:
+            out["docs"] = self.docs
         if not kwargs.get("no_cons", False):
             out["type"] = self.constructor
         if self._type_args:
@@ -178,10 +180,12 @@ class TypeRef(Annotatable):
     def __json__(self, **kwargs):
         target = self._target.__json__(**kwargs) if self._target else None
         out = {}
+        if kwargs.get("include_docs", False) and self.docs:
+            out["docs"] = self.docs
         if self.fqn:
-            return self.fqn
-            # out["fqn"] = {"fqn": self.fqn}
-        if target and len(target) > 0:
+            # return self.fqn
+            out["fqn"] = {"fqn": self.fqn}
+        elif target and len(target) > 0:
             return target
             # out["target"] = target
         return out
