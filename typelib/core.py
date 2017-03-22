@@ -67,8 +67,6 @@ class Type(Annotatable):
         """
         Annotatable.__init__(self, annotations, docs)
 
-        if fqn and fqn.endswith("ChannelResponse"):
-            ipdb.set_trace()
         if type(constructor) not in (str, unicode):
             ipdb.set_trace()
             raise tlerrors.TLException("constructor must be a string")
