@@ -50,7 +50,7 @@ class Type(Annotatable):
     like monads that can be defined else where.  The advantage of this is that two types can now
     be checked for equivalency regardless of how they are referenced.
     """
-    def __init__(self, parent_typeref, constructor, type_params, type_args = None, annotations = None, docs = "", name = None):
+    def __init__(self, parent_typeref, constructor, type_params, type_args = None, annotations = None, docs = "", fqn = None):
         """
         Creates a new type object.
 
@@ -83,15 +83,15 @@ class Type(Annotatable):
 
         self._type_args = []
 
-        self._name = name
+        self._fqn = fqn
 
         if type_args:
             for type_arg in type_args:
                 self.add_arg(type_arg)
 
     @property
-    def name(self):
-        return self._name
+    def fqn(self):
+        return self._fqn
 
     @property
     def parameters(self):
@@ -150,8 +150,8 @@ class Type(Annotatable):
 
     def __json__(self, **kwargs):
         out = {}
-        if self.name:
-            out["name"] = self.name
+        if self.fqn:
+            out["fqn"] = self.fqn
         if kwargs.get("include_docs", False) and self.docs:
             out["docs"] = self.docs
         if not kwargs.get("no_cons", False):
