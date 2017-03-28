@@ -141,14 +141,14 @@ class Annotation(object):
             return self._param_specs[name]
         return None
 
-    def first_value_of(self, name):
+    def first_value_of(self, name, default_value = None):
         """
         Return the first value of a particular param by name if it exists otherwise false.
         """
         vals = self.values_of(name)
         if vals is not None:
             return vals[0]
-        return None
+        return default_value
 
     def __repr__(self):
         ipdb.set_trace()
