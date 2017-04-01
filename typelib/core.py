@@ -258,6 +258,7 @@ class TypeRef(Annotatable):
     def _set_fqn(self, value):
         self._fqn = value
 
+AnyType = Type(None, "any", type_params = None)
 BooleanType = Type(None, "boolean", type_params = None)
 ByteType = Type(None, "byte", type_params = None)
 IntType = Type(None, "int", type_params = None)

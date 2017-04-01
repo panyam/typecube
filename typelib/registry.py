@@ -16,6 +16,7 @@ class TypeRegistry(object):
         self.type_refs = {}
 
         # register references to default types.
+        self.register_type("any", core.AnyType)
         self.register_type("boolean", core.BooleanType)
         self.register_type("byte", core.ByteType)
         self.register_type("int", core.IntType)
