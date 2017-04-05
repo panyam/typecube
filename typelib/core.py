@@ -79,6 +79,7 @@ class Type(Annotatable):
         self.constructor = constructor
         self.is_sum_type = False
 
+        self._signature = None
         self._parameters = type_params
 
         self._type_args = []
@@ -159,6 +160,17 @@ class Type(Annotatable):
         if self._type_args:
             out["args"] = [arg.json(**kwargs) for arg in self._type_args]
         return out
+
+    @property
+    def signature(self):
+        if not self._signature:
+            out = self.constructor or ""
+            if self._type_args:
+                out += "(" + ", ".join([t.typeref.final_type.signature for t in self._type_args]) + ")"
+            if self.output_typeref:
+                out += " : " + self.output_typeref.final_type.signature
+            self._signature = out
+        return self._signature
 
 class TypeRef(Annotatable):
     """
@@ -272,9 +284,9 @@ def FixedType(size, annotations = None, docs = None):
     out.type_data = size
     return out
 
-def UnionType(child_typerefs, annotations = None, docs = None, name = None):
+def UnionType(child_typerefs, annotations = None, docs = None, fqn = None):
     assert type(child_typerefs) is list
-    return Type(None, "union", type_params = None, type_args = child_typerefs, annotations = annotations, docs = docs, name = name)
+    return Type(None, "union", type_params = None, type_args = child_typerefs, annotations = annotations, docs = docs, fqn = fqn)
 
 def TupleType(child_typerefs, annotations = None, docs = None):
     assert type(child_typerefs) is list
