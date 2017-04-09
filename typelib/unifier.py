@@ -12,19 +12,15 @@ def can_substitute(type1, type2):
         return True
 
     if type1.constructor != type2.constructor:
-        ipdb.set_trace()
         return False
 
     if type1.is_sum_type != type2.is_sum_type:
-        ipdb.set_trace()
         return False
 
     if type1.fqn != type2.fqn:
-        ipdb.set_trace()
         return False
 
     if type1.argcount != type2.argcount:
-        ipdb.set_trace()
         return False
 
     for arg1,arg2 in izip(type1.args, type2.args):
