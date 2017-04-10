@@ -138,3 +138,22 @@ class TypeRegistry(object):
             raise TLException("A type reference with name '%s' already exists" % newvalue)
         else:
             self.type_refs[self.fqn] = typeref
+
+    def get_final_type(self, type_ref_or_fqn):
+        """
+        Gets the final Type object for a particular typeref or a FQN key.
+        """
+        if not type_ref_or_fqn:
+            ipdb.set_trace()
+
+        # If Type then return as is we are already at the leaf
+        if type(type_ref_or_fqn) is core.Type:
+            return type_ref_or_fqn
+        elif type(type_ref_or_fqn) is core.TypeRef:
+            return type_ref_or_fqn.final_type
+        else:   # we have a string
+            fqn = type_ref_or_fqn
+            typeref = self.get_typeref(fqn)
+            if not typeref:
+                raise errors.OneringException("Invalid type: %s" % fqn)
+            return typeref.final_type
