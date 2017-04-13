@@ -15,16 +15,6 @@ class TypeRegistry(object):
     def __init__(self):
         self.type_refs = {}
 
-        # register references to default types.
-        self.register_type("any", core.AnyType)
-        self.register_type("boolean", core.BooleanType)
-        self.register_type("byte", core.ByteType)
-        self.register_type("int", core.IntType)
-        self.register_type("long", core.LongType)
-        self.register_type("float", core.FloatType)
-        self.register_type("double", core.DoubleType)
-        self.register_type("string", core.StringType)
-
     def typerefs_for_wildcards(self, wildcards, skip_unresolved = True):
         """
         Return all type refs that match any of the given wild cards.
@@ -62,7 +52,7 @@ class TypeRegistry(object):
         ipdb.set_trace()
         raise errors.TLException("Reference to type '%s' not found" % fqn)
 
-    def register_type(self, fqn, newtype_or_ref, overwrite = False):
+    def register_type2(self, fqn, newtype_or_ref, overwrite = False):
         """
         Register's a new type for a given FQN and returns a reference to the type.
         If the type itself is unresolved or needs to be changed it can be done so
@@ -84,7 +74,8 @@ class TypeRegistry(object):
         if fqn not in self.type_refs:
             newtyperef = newtype_or_ref
             if is_type or newtype_or_ref is None:
-                newtyperef = core.TypeRef(newtype_or_ref, fqn)
+                parent = newtype_or_ref.parent
+                newtyperef = core.TypeRef(newtype_or_ref, fqn, parent)
             self.type_refs[fqn] = newtyperef
             return newtyperef
 

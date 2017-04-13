@@ -3,9 +3,9 @@ import ipdb
 from typelib import utils as tlutils
 from typelib import core as tlcore
 
-def FunctionType(input_params, output_typeref, annotations = None, docs = "", fqn = None):
-    out = tlcore.Type(None, "function", type_params = None, type_args = input_params,
-                      annotations = annotations, docs = docs, fqn = fqn)
+def FunctionType(name, parent, input_params, output_typeref, annotations = None, docs = ""):
+    out = tlcore.Type(name, parent, "function", type_params = None, type_args = input_params,
+                      annotations = annotations, docs = docs)
     out.output_typeref = output_typeref
     return out
 

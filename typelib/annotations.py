@@ -4,7 +4,7 @@ import pprint
 import cStringIO
 from collections import defaultdict
 
-AS_JSON = False
+AS_JSON = True
 
 class Annotatable(object):
     def __init__(self, annotations = None, docs = ""):

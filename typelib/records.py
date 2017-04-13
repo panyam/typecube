@@ -3,8 +3,8 @@ import ipdb
 from typelib import utils as tlutils
 from typelib import core as tlcore
 
-def RecordType(fields, annotations = None, docs = None, fqn = None):
-    return tlcore.Type(None, "record", type_params = None, type_args = fields, annotations = annotations, docs = docs, fqn = fqn)
+def RecordType(name, parent, fields, annotations = None, docs = None):
+    return tlcore.Type(name, parent, "record", type_params = None, type_args = fields, annotations = annotations, docs = docs)
 
 class FieldTypeArg(tlcore.TypeArg):
     """
