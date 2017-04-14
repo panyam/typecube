@@ -12,13 +12,21 @@ class Entity(Annotatable):
         self._parent = parent 
         self.child_entities = []
         self.entity_map = {}
-        if parent: parent.add_entity(self)
+        self.aliases = {}
+
+    def set_alias(self, name, fqn):
+        self.aliases[name] = fqn
 
     @property
     def tag(self): return self.__class__.TAG 
 
+    def get_entity(self, name):
+        return self.entity_map.get(name, None)
+
     def add_entity(self, entity):
         """ Adds a new child entity. """
+        if not (entity.name and entity.name not in self.entity_map):
+            ipdb.set_trace()
         assert entity.name and entity.name not in self.entity_map
         self.entity_map[entity.name] = entity
         entity._parent = self
