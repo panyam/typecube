@@ -12,6 +12,7 @@ class Entity(Annotatable):
         self._parent = parent 
         self.child_entities = []
         self.entity_map = {}
+        self._symbol_refs = {}
         self.aliases = {}
 
     def set_alias(self, name, fqn):
@@ -26,6 +27,11 @@ class Entity(Annotatable):
         if self.parent and self.parent.fqn:
             out = self.parent.fqn + "." + out
         return out or ""
+
+    def add_symbol_ref(self, fqn):
+        if fqn not in self._symbol_refs:
+            self._symbol_refs[fqn] = EntityRef(None, fqn, self)
+        return self._symbol_refs[fqn]
 
     def add(self, entity):
         """ Adds a new child entity. """
