@@ -20,10 +20,14 @@ class Entity(Annotatable):
     @property
     def tag(self): return self.__class__.TAG 
 
-    def get_entity(self, name):
-        return self.entity_map.get(name, None)
+    @property
+    def fqn(self):
+        out = self.name
+        if self.parent and self.parent.fqn:
+            out = self.parent.fqn + "." + out
+        return out or ""
 
-    def add_entity(self, entity):
+    def add(self, entity):
         """ Adds a new child entity. """
         if not (entity.name and entity.name not in self.entity_map):
             ipdb.set_trace()
@@ -32,15 +36,10 @@ class Entity(Annotatable):
         entity._parent = self
         self.child_entities.append(entity)
 
-    @property
-    def fqn(self):
-        out = self.name
-        if self.parent and self.parent.fqn:
-            out = self.parent.fqn + "." + out
-        return out or ""
-
-    def resolve_key_parts(self, parts):
+    def get(self, fqn_or_parts):
         """ Given a list of key path parts, tries to resolve the descendant entity that matchies this part prefix. """
+        if type(fqn_or_parts) in (unicode, str):
+            parts = fqn_or_parts.split(".")
         curr = self
         for part in parts:
             if part not in curr.entity_map:
