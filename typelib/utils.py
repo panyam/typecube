@@ -1,3 +1,11 @@
+import ipdb
+
+def ensure_types(**conditions):
+    """ A decorator when applied to a function performs type checking on the arguments passed to it. """
+    def constructor(target_func, *args, **kwargs):
+        a = conditions
+        ipdb.set_trace()
+    return constructor
 
 class FQN(object):
     def __init__(self, name, namespace, ensure_namespaces_are_equal = True):

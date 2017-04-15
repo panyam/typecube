@@ -1,6 +1,7 @@
 
 from collections import defaultdict
 import ipdb
+from utils import ensure_types
 from typelib import errors as tlerrors
 from typelib.annotations import Annotatable
 
@@ -33,7 +34,7 @@ class Entity(Annotatable):
         if fqn not in self._symbol_refs:
             # Ensure symbol refs dont have a parent as they are not bound to the parent but
             # to some arbitrary scope that is using them to refer to the FQN
-            self._symbol_refs[fqn] = EntityRef(None, fqn, None)
+            self._symbol_refs[fqn] = SymbolRef(fqn)
         return self._symbol_refs[fqn]
 
     def add(self, entity):
@@ -83,10 +84,14 @@ class Entity(Annotatable):
 
     def resolve_binding(self, typeref):
         if not typeref: return
+        assert issubclass(typeref.__class__, EntityRef)
         symref = typeref
         while symref and not symref.is_resolved:
             symref.target = self.find_fqn(symref.fqn)
+            # only drill into it we have another entity ref
+            if symref.target and not issubclass(symref.target.__class__, EntityRef): break
             symref = symref.target
+
         final_entity = None if not symref else symref.final_entity
         if symref and not final_entity:
             # Try to resolve it too
@@ -120,9 +125,7 @@ class EntityRef(Entity):
     """
     A named reference to an entity.
     """
-
     TAG = "REF"
-
     def __init__(self, entry, name, parent, annotations = None, docs = ""):
         Entity.__init__(self, name, parent, annotations, docs)
         if name and type(name) not in (str, unicode):
@@ -146,7 +149,7 @@ class EntityRef(Entity):
         return out
 
     def _categorise_target(self, entry):
-        self._is_ref = isinstance(entry, EntityRef)
+        self._is_ref = issubclass(entry.__class__, EntityRef)
         self._is_entity = isinstance(entry, Entity)
         if not (self._is_entity or self._is_ref or entry is None):
             ipdb.set_trace()
@@ -174,7 +177,7 @@ class EntityRef(Entity):
         curr = self
         while curr.target:
             curr = curr.target
-            if not isinstance(curr, EntityRef): return None
+            if not issubclass(curr.__class__, EntityRef): return None
         return curr
 
     @property
@@ -187,7 +190,7 @@ class EntityRef(Entity):
         Return the first type in this chain that is an actual entity and not an entity ref.
         """
         curr = self._target
-        while curr and isinstance(curr, EntityRef):
+        while curr and not issubclass(curr.__class__, EntityRef):
             curr = curr._target
         return curr
 
@@ -198,7 +201,7 @@ class EntityRef(Entity):
         """
         # TODO - Memoize the result
         curr = self._target
-        while curr and isinstance(curr, EntityRef):
+        while curr and issubclass(curr.__class__, EntityRef):
             curr = curr._target
         return curr
 
@@ -210,6 +213,15 @@ class EntityRef(Entity):
     def set_target(self, newentity):
         # TODO - Check for cyclic references
         self._target = newentity
+
+class SymbolRef(EntityRef):
+    TAG = "SYM"
+    def __init__(self, fqn):
+        EntityRef.__init__(self, None, fqn, None)
+
+    @property
+    def fqn(self):
+        return self.name
 
 class Type(Entity):
     """
@@ -290,11 +302,11 @@ class Type(Entity):
         """
         Add an argument type.
         """
-        if not isinstance(arg, TypeArg) and not isinstance(arg, EntityRef):
+        if not isinstance(arg, TypeArg) and not issubclass(arg.__class__, EntityRef):
             ipdb.set_trace()
             raise tlerrors.TLException("Argument must be a TypeArg or EntityRef instance")
 
-        if isinstance(arg, EntityRef):
+        if issubclass(arg.__class__, EntityRef):
             # Create an arg out of it
             arg = TypeArg(arg)
 
@@ -354,7 +366,7 @@ class TypeArg(Annotatable):
         Annotatable.__init__(self, annotations, docs)
         self._name = name
         self.is_param = type(typeref_or_param) is TypeParam
-        if type(typeref_or_param) not in (EntityRef, TypeParam):
+        if not (issubclass(typeref_or_param.__class__, TypeParam) or issubclass(typeref_or_param.__class__, EntityRef)):
             ipdb.set_trace()
             assert False, "Argument must be a EntityRef or a TypeParam"
         self.typeref = typeref_or_param
