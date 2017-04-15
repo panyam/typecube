@@ -47,6 +47,7 @@ class Entity(Annotatable):
 
     def get(self, fqn_or_parts):
         """ Given a list of key path parts, tries to resolve the descendant entity that matchies this part prefix. """
+        parts = fqn_or_parts
         if type(fqn_or_parts) in (unicode, str):
             parts = fqn_or_parts.split(".")
         curr = self
