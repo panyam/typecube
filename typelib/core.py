@@ -16,7 +16,8 @@ class Entity(Annotatable):
         self.aliases = {}
 
     def set_alias(self, name, fqn):
-        self.aliases[name] = fqn
+        """Sets the alias of a particular name to an FQN."""
+        self.aliases[name] = self.add_symbol_ref(fqn)
 
     @property
     def tag(self): return self.__class__.TAG 
@@ -30,7 +31,9 @@ class Entity(Annotatable):
 
     def add_symbol_ref(self, fqn):
         if fqn not in self._symbol_refs:
-            self._symbol_refs[fqn] = EntityRef(None, fqn, self)
+            # Ensure symbol refs dont have a parent as they are not bound to the parent but
+            # to some arbitrary scope that is using them to refer to the FQN
+            self._symbol_refs[fqn] = EntityRef(None, fqn, None)
         return self._symbol_refs[fqn]
 
     def add(self, entity):
@@ -53,6 +56,18 @@ class Entity(Annotatable):
             curr = curr.entity_map[part]
         return curr
 
+    def find_fqn(self, fqn):
+        """Looks for a FQN in either the aliases or child entities or recursively in the parent."""
+        out = None
+        curr = self
+        while curr and not out:
+            out = curr.aliases.get(fqn, None)
+            if not out:
+                out = curr.get(fqn)
+            if not out:
+                curr = curr.parent
+        return out
+
     def ensure_key(self, fqn_or_name_or_parts):
         """Ensures that a descendant hierarchy of Entities or EntityRefs exists given the key path parts."""
         parts = fqn_or_name_or_parts
@@ -64,6 +79,21 @@ class Entity(Annotatable):
                 curr.entity_map[part] = EntityRef(None, part, parent = curr)
             curr = curr.entity_map[part]
         return curr
+
+    def resolve_binding(self, typeref):
+        symref = typeref
+        while symref and not symref.is_resolved:
+            symref.target = self.find_fqn(symref.fqn)
+            symref = symref.target
+        final_entity = None if not symref else symref.final_entity
+        if not final_entity:
+            raise tlerrors.TLException("%s could not be resolved" % typeref.fqn)
+        if type(final_entity) is Type:
+            # for the final entity, resolve the bindings of its args too!
+            if final_entity.output_typeref:
+                self.resolve_binding(final_entity.output_typeref)
+            for arg in final_entity.args: self.resolve_binding(arg.typeref)
+        return symref
 
     @property
     def name(self): return self._name
@@ -286,9 +316,9 @@ class Type(Entity):
         if not self._signature:
             out = self.constructor or ""
             if self._type_args:
-                out += "(" + ", ".join([t.typeref.final_type.signature for t in self._type_args]) + ")"
+                out += "(" + ", ".join([t.typeref.final_entity.signature for t in self._type_args]) + ")"
             if self.output_typeref:
-                out += " : " + self.output_typeref.final_type.signature
+                out += " : " + self.output_typeref.final_entity.signature
             self._signature = out
         return self._signature
 
