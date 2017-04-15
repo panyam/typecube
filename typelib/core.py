@@ -82,13 +82,18 @@ class Entity(Annotatable):
         return curr
 
     def resolve_binding(self, typeref):
+        if not typeref: return
         symref = typeref
         while symref and not symref.is_resolved:
             symref.target = self.find_fqn(symref.fqn)
             symref = symref.target
         final_entity = None if not symref else symref.final_entity
-        if not final_entity:
-            raise tlerrors.TLException("%s could not be resolved" % typeref.fqn)
+        if symref and not final_entity:
+            # Try to resolve it too
+            self.resolve_binding(symref.last_unresolved)
+            final_entity = None if not symref else symref.final_entity
+            if not final_entity:
+                raise tlerrors.TLException("%s could not be resolved" % typeref.fqn)
         if type(final_entity) is Type:
             # for the final entity, resolve the bindings of its args too!
             if final_entity.output_typeref:
@@ -163,6 +168,14 @@ class EntityRef(Entity):
     @property
     def is_entity(self):
         return self._is_entity
+
+    @property
+    def last_unresolved(self):
+        curr = self
+        while curr.target:
+            curr = curr.target
+            if not isinstance(curr, EntityRef): return None
+        return curr
 
     @property
     def target(self):
