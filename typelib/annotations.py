@@ -8,9 +8,9 @@ AS_JSON = True
 
 class Annotatable(object):
     def __init__(self, annotations = None, docs = ""):
-        if annotations:
+        if annotations is not None:
             assert type(annotations) is Annotations
-        self._annotations = annotations or []
+        self._annotations = annotations or Annotations()
         self.docs = docs or ""
 
     def __repr__(self):
@@ -63,9 +63,8 @@ class Annotations(object):
     Keeps track of annotations.
     """
     def __init__(self, annotations = []):
-        if annotations is None:
-            annotations = []
-        elif type(annotations) is Annotations:
+        annotations = annotations or []
+        if type(annotations) is Annotations:
             annotations = annotations.all_annotations
         self.all_annotations = annotations
 

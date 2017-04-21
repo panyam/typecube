@@ -142,7 +142,7 @@ class EntityRef(Entity):
             out["docs"] = self.docs
         if self.name:
             # return self.name
-            out["name"] = {"name": self.name}
+            out["name"] = self.name
         elif target and len(target) > 0:
             return target
             # out["target"] = target
