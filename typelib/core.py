@@ -27,6 +27,8 @@ class Entity(Annotatable):
     def fqn(self):
         out = self.name
         if self.parent and self.parent.fqn:
+            if out is None:
+                ipdb.set_trace()
             out = self.parent.fqn + "." + out
         return out or ""
 
