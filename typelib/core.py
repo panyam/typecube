@@ -313,7 +313,7 @@ class Type(Entity):
         if arg.name:
             index = self.index_for(arg.name)
             if index >= 0:
-                raise tlerrors.TLException("Child type by the given name '%s' already exists" % name)
+                raise tlerrors.TLException("Child type by the given name '%s' already exists" % arg.name)
 
         # Check the typeparam if it is specified is valid
         if arg.is_param:
