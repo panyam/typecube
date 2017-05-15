@@ -71,3 +71,37 @@ def evaluate_fqn(namespace, name):
     if namespace:
         fqn = namespace + "." + name 
     return fqn
+
+class ResolutionStatus(object):
+    def __init__(self):
+        self._resolved = False
+        self._resolving = False
+
+    @property
+    def succeeded(self):
+        return self._resolved
+
+    @property
+    def in_progress(self):
+        return self._resolving
+
+    def _mark_in_progress(self, value):
+        self._resolving = value
+
+    def _mark_resolved(self, value):
+        self._resolved = value
+
+    def perform_once(self, action):
+        result = None
+        if not self._resolved:
+            if self._resolving:
+                from onering import errors
+                raise errors.OneringException("Action already in progress.   Possible circular dependency found")
+
+            self._resolving = True
+
+            result = action()
+
+            self._resolving = False
+            self._resolved = True
+        return result

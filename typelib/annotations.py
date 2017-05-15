@@ -41,9 +41,20 @@ class Annotatable(object):
                 out["__cls__"] = self.__class__.__name__
         return out
 
+    def set_annotations(self, annotations):
+        self.annotations = annotations
+        return self
+
+    def set_docs(self, docs):
+        self.docs = docs
+        return self
+
     @property
     def annotations(self):
         return self._annotations
+
+    @annotations.setter
+    def annotations(self, value): self._annotations = value
 
     def get_annotation(self, name):
         for annotation in self._annotations:
