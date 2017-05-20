@@ -11,6 +11,6 @@ def EnumSymbol(name, parent, value = None, annotations = None, docs = ""):
 def EnumType(name, parent, symbols = None, type_args = None, annotations = None, docs = None):
     out = core.make_type("enum", name, parent, type_args = type_args, annotations = annotations, docs = docs)
     for symbol in symbols or []:
-        out.args.add(core.TypeArg(symbol.name, core.TypeVariable(symbol)))
+        out.args.add(core.TypeArg(symbol.name, core.TypeName(symbol)))
     return out
 

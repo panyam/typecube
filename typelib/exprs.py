@@ -59,6 +59,9 @@ class Statement(object):
                 self.target_variable.evaluated_typeexpr = last_expr.evaluated_typeexpr
                 parent_function.register_temp_var(varname, last_expr.evaluated_typeexpr)
 
+    def resolve_type_name(self, name):
+        return self.resolver.resolve_type_name(name)
+
 class Expression(object):
     """
     Parent of all expressions.  All expressions must have a value.  Expressions only appear in functions.
@@ -94,6 +97,9 @@ class Expression(object):
         # Forbid changing of resolvers for now
         assert self.resolver is None
         self.resolver = resolver
+
+    def resolve_type_name(self, name):
+        return self.resolver.resolve_type_name(name)
 
 class VariableExpression(Expression):
     def __init__(self, field_path):
@@ -160,6 +166,8 @@ class VariableExpression(Expression):
                     assert self.field_path.length == 1
                     fname = self.field_path.get(0)
                     self.is_function = True
+                    if not self.resolver:
+                        ipdb.set_trace()
                     self.resolved_value = self.root_value = self.resolver.resolve_name(fname)
                     self._evaluated_typeexpr = self.resolved_value.type_expr
 
@@ -178,7 +186,6 @@ class Function(Expression, tlcore.Annotatable):
         self.parent = parent
         self.name = name
         self.func_type = func_type
-        self.statements = []
         self.is_external = False
         self.dest_varname = "dest" if func_type else None
 
@@ -196,7 +203,8 @@ class Function(Expression, tlcore.Annotatable):
         be and what it should do depends on the child.
         """
         Expression.set_resolver(self, resolver)
-        for statement in self.statements:
+        self.func_type.set_resolver(self)
+        for statement in self.all_statements:
             statement.set_resolver(self)
 
     @property
@@ -304,8 +312,9 @@ class FunctionCall(Expression):
         be and what it should do depends on the child.
         """
         Expression.set_resolver(self, resolver)
-        for statement in self.statements:
-            statement.set_resolver(resolver)
+        self.func_expr.set_resolver(resolver)
+        for arg in self.func_args:
+            arg.set_resolver(resolver)
 
     def resolve_bindings_and_types(self, parent_function):
         """
