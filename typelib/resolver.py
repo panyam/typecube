@@ -1,8 +1,6 @@
 
 import ipdb
 from collections import deque
-from core import EntityRef, Module
-from functions import Function
 import errors as tlerrors
 
 def resolve_type_expression(type_exp, context):
