@@ -14,6 +14,7 @@ class Expression(object):
     def __init__(self):
         self._evaluated_typeexpr = None
         self.resolver = None
+        self._resolved_value = None
 
     @property
     def evaluated_typeexpr(self):
@@ -26,9 +27,25 @@ class Expression(object):
     def evaluated_typeexpr(self, typeexpr):
         self.set_evaluated_typeexpr(typeexpr)
 
-    def resolve_bindings_and_types(self, parent_function):
+    @property
+    def resolved_value(self):
+        if self._resolved_value is None:
+            if self.resolver is None:
+                ipdb.set_trace()
+            assert self.resolver is not None
+            self._resolved_value = self.resolve()
+            assert self._resolved_value is not None, "Invalid resolved value for expression: '%s'" % repr(self)
+        return self._resolved_value
+
+    def resolve(self):
+        """Processes an expressions and resolves name bindings and creating new local vars 
+        in the process if required.
         """
-        Processes an expressions and resolves name bindings and creating new local vars 
+        assert False, "Not Implemented"
+        return None
+
+    def resolve_bindings_and_types(self, parent_function):
+        """Processes an expressions and resolves name bindings and creating new local vars 
         in the process if required.
         """
         pass
@@ -222,7 +239,11 @@ class Function(Expression, tlcore.Annotatable):
 
     @property
     def dest_typearg(self):
-        return self.func_type.args[-1]
+        out = self.func_type.args[-1]
+        if out.type_expr.resolved_value.name == "void":
+            return None
+        return out
+
 
     def add_statement(self, stmt):
         if not isinstance(stmt, Statement):

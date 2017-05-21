@@ -20,20 +20,17 @@ class TypeExpression(object):
         self.resolver = None
         self._resolved_value = None
 
+    def signature(self, visited = None):
+        assert False, "Not Implemented"
+
     @property
     def resolved_value(self):
         if self._resolved_value is None:
-            if self.resolver is None:
-                ipdb.set_trace()
-            assert self.resolver is not None
             self._resolved_value = self.resolve()
             if not self._resolved_value or not type(self._resolved_value) in (TypeParam, TypeFunction):
                 ipdb.set_trace()
                 assert False, "Invalid resolved value type: '%s'" % repr(self._resolved_value)
         return self._resolved_value
-
-    def signature(self, visited = None):
-        assert False, "Not Implemented"
 
     def resolve(self):
         """ This method resolves a type expression to a type object. """
@@ -48,7 +45,7 @@ class TypeExpression(object):
         """
         if self.resolver:
             ipdb.set_trace()
-        assert self.resolver is None
+            assert False, "Resolver has been set.  Cannot be set again."
         self.resolver = resolver
 
 class TypeParam(TypeExpression):
@@ -140,6 +137,8 @@ class TypeFunction(TypeExpression, Annotatable):
 
     def resolve(self):
         # A TypeFunction resolves to itself
+        if not self.type_params and self.name == "map":
+            ipdb.set_trace()
         for index,arg in enumerate(self.args):
             arg.type_expr.resolved_value
         return self
