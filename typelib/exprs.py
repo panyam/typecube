@@ -7,64 +7,6 @@ from typelib import core as tlcore
 from typelib.annotations import Annotatable
 from typelib import unifier as tlunifier
 
-class Statement(object):
-    def __init__(self, expressions, target_variable, is_temporary = False):
-        self.expressions = expressions
-        self.target_variable = target_variable
-        self.target_variable.is_temporary = is_temporary or target_variable.field_path.get(0) == '_'
-        self.is_implicit = False
-        self.resolver = None
-        if self.target_variable.is_temporary:
-            assert target_variable.field_path.length == 1, "A temporary variable cannot have nested field paths"
-
-    @property
-    def is_temporary(self):
-        return self.target_variable and self.target_variable.is_temporary
-
-    def set_resolver(self, resolver):
-        """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
-        how to bind/resolve names the expression itself refers.  This step recursively assigns
-        a resolver to every entity, expression that needs a resolver.  What the resolver should 
-        be and what it should do depends on the child.
-        """
-        # Forbid changing of resolvers for now
-        self.resolver = resolver
-        for expr in self.expressions:
-            expr.set_resolver(resolver)
-
-    def resolve_bindings_and_types(self, parent_function):
-        """
-        Processes an expressions and resolves name bindings and creating new local vars 
-        in the process if required.
-        """
-        # Resolve the target variable's binding.  This does'nt necessarily have
-        # to evaluate types.
-        # This will help us with type inference going backwards
-        if not self.is_temporary:
-            self.target_variable.resolve_bindings_and_types(parent_function)
-
-        # Resolve all types in child expressions.  
-        # Apart from just evaluating all child expressions, also make sure
-        # Resolve field paths that should come from source type
-        for expr in self.expressions:
-            expr.resolve_bindings_and_types(parent_function)
-
-        last_expr = self.expressions[-1]
-        if self.target_variable.is_temporary:
-            varname = str(self.target_variable.field_path)
-            if varname == "_":
-                self.target_variable = None
-            else:
-                # Resolve field paths that should come from dest type
-                self.target_variable.evaluated_typeexpr = last_expr.evaluated_typeexpr
-                parent_function.register_temp_var(varname, last_expr.evaluated_typeexpr)
-
-    def resolve_type_name(self, name):
-        return self.resolver.resolve_type_name(name)
-
-    def resolve_name(self, name):
-        return None if not self.resolver else self.resolver.resolve_name(name)
-
 class Expression(object):
     """
     Parent of all expressions.  All expressions must have a value.  Expressions only appear in functions.
@@ -106,6 +48,58 @@ class Expression(object):
 
     def resolve_name(self, name):
         return None if not self.resolver else self.resolver.resolve_name(name)
+
+class Statement(Expression):
+    def __init__(self, expressions, target_variable, is_temporary = False):
+        Expression.__init__(self)
+        self.expressions = expressions
+        self.target_variable = target_variable
+        self.target_variable.is_temporary = is_temporary or target_variable.field_path.get(0) == '_'
+        self.is_implicit = False
+        if self.target_variable.is_temporary:
+            assert target_variable.field_path.length == 1, "A temporary variable cannot have nested field paths"
+
+    @property
+    def is_temporary(self):
+        return self.target_variable and self.target_variable.is_temporary
+
+    def set_resolver(self, resolver):
+        """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
+        how to bind/resolve names the expression itself refers.  This step recursively assigns
+        a resolver to every entity, expression that needs a resolver.  What the resolver should 
+        be and what it should do depends on the child.
+        """
+        # Forbid changing of resolvers for now
+        Expression.set_resolver(self, resolver)
+        for expr in self.expressions:
+            expr.set_resolver(resolver)
+
+    def resolve_bindings_and_types(self, parent_function):
+        """
+        Processes an expressions and resolves name bindings and creating new local vars 
+        in the process if required.
+        """
+        # Resolve the target variable's binding.  This does'nt necessarily have
+        # to evaluate types.
+        # This will help us with type inference going backwards
+        if not self.is_temporary:
+            self.target_variable.resolve_bindings_and_types(parent_function)
+
+        # Resolve all types in child expressions.  
+        # Apart from just evaluating all child expressions, also make sure
+        # Resolve field paths that should come from source type
+        for expr in self.expressions:
+            expr.resolve_bindings_and_types(parent_function)
+
+        last_expr = self.expressions[-1]
+        if self.target_variable.is_temporary:
+            varname = str(self.target_variable.field_path)
+            if varname == "_":
+                self.target_variable = None
+            else:
+                # Resolve field paths that should come from dest type
+                self.target_variable.evaluated_typeexpr = last_expr.evaluated_typeexpr
+                parent_function.register_temp_var(varname, last_expr.evaluated_typeexpr)
 
 class VariableExpression(Expression):
     def __init__(self, field_path):
@@ -152,14 +146,13 @@ class VariableExpression(Expression):
                     break
 
             if not var_typearg:
-                if parent_function.dest_typearg.name == first:
+                if parent_function.dest_varname == first:
                     var_typearg = parent_function.dest_typearg
 
             if var_typearg:
                 self.root_value = var_typearg
                 self._evaluated_typeexpr = var_typearg.type_expr
                 if field_path_tail.length > 0:
-                    # self.field_resolution_result = resolve_path_from_record(src_typeref, field_path_tail, context, None)
                     curr_typearg = var_typearg
                     for i in xrange(field_path_tail.length):
                         part = field_path_tail.get(i)
@@ -169,6 +162,8 @@ class VariableExpression(Expression):
                     self._evaluated_typeexpr = resolved_value.type_expr
             else:
                 # Check if this is actually referring to a function and not a member
+                if self.field_path.length != 1:
+                    ipdb.set_trace()
                 assert self.field_path.length == 1
                 fname = self.field_path.get(0)
                 self.is_function = True
