@@ -126,6 +126,8 @@ class TypeFunction(TypeExpression, Annotatable):
             return TypeParam(name, self)
 
         # if we cannot bind to a var then send to parent
+        # This may change if we allow inner types (but is that really a "child" type or 
+        # just something lexically scoped but semnatically stored somewhere else?)
         return self.resolver.resolve_type_name(name)
 
     def set_resolver(self, resolver):
