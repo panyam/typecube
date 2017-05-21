@@ -62,6 +62,9 @@ class Statement(object):
     def resolve_type_name(self, name):
         return self.resolver.resolve_type_name(name)
 
+    def resolve_name(self, name):
+        return None if not self.resolver else self.resolver.resolve_name(name)
+
 class Expression(object):
     """
     Parent of all expressions.  All expressions must have a value.  Expressions only appear in functions.
@@ -101,6 +104,9 @@ class Expression(object):
     def resolve_type_name(self, name):
         return self.resolver.resolve_type_name(name)
 
+    def resolve_name(self, name):
+        return None if not self.resolver else self.resolver.resolve_name(name)
+
 class VariableExpression(Expression):
     def __init__(self, field_path):
         super(VariableExpression, self).__init__()
@@ -110,7 +116,6 @@ class VariableExpression(Expression):
         self.is_function = False
         self.field_path = field_path
         self.root_value = None
-        self.resolved_value = None
         assert type(field_path) is FieldPath and field_path.length > 0
 
     def __repr__(self):
@@ -128,7 +133,6 @@ class VariableExpression(Expression):
         in the process if required.
         """
         assert self._evaluated_typeexpr == None, "Type has already been resolved, should not have been called twice."
-        from onering.core.resolvers import resolve_path_from_record
 
         first, field_path_tail = self.field_path.pop()
         self.is_temporary = self.is_temporary or first == "_" or parent_function.is_temp_variable(first)
@@ -141,39 +145,37 @@ class VariableExpression(Expression):
                 self._evaluated_typeexpr = parent_function.temp_var_type(self.field_path)
         else:
             # See which of the params we should bind to
+            var_typearg = None
             for src_typearg in parent_function.source_typeargs:
                 if src_typearg.name == first:
-                    self.root_value = src_typearg
-                    self._evaluated_typeexpr = src_typearg.type_expr
-                    if field_path_tail.length > 0:
-                        # self.field_resolution_result = resolve_path_from_record(src_typeref, field_path_tail, context, None)
-                        self.resolved_value = src_typearg.get_by_path(field_path_tail)
-                        self._evaluated_typeexpr = self.resolved_value.type_expr
+                    var_typearg = src_typearg
                     break
-            else:
-                if parent_function.dest_typearg.name == first:
-                    # If we are dealing with an output variable, we dont want to directly reference the var
-                    # because the output value could be created (via a constructor) at the end.  Instead
-                    # save to other newly created temp vars and finally collect them and do bulk setters 
-                    # on the output var or a constructor on the output var or both.
-                    # self.field_resolution_result = resolve_path_from_record(parent_function.dest_typeref, field_path_tail, context, None)
-                    self.root_value = dest_typearg
-                    self.resolved_value = dest_typearg
-                    self._evaluated_typeexpr = dest_typearg.type_expr
-                else:
-                    # Check if this is actually referring to a function and not a member
-                    # Where do we look for functions?
-                    assert self.field_path.length == 1
-                    fname = self.field_path.get(0)
-                    self.is_function = True
-                    if not self.resolver:
-                        ipdb.set_trace()
-                    self.resolved_value = self.root_value = self.resolver.resolve_name(fname)
-                    self._evaluated_typeexpr = self.resolved_value.type_expr
 
-            if not self._evaluated_typeexpr and not self.field_resolution_result:
+            if not var_typearg:
+                if parent_function.dest_typearg.name == first:
+                    var_typearg = parent_function.dest_typearg
+
+            if var_typearg:
+                self.root_value = var_typearg
+                self._evaluated_typeexpr = var_typearg.type_expr
+                if field_path_tail.length > 0:
+                    # self.field_resolution_result = resolve_path_from_record(src_typeref, field_path_tail, context, None)
+                    curr_typearg = var_typearg
+                    for i in xrange(field_path_tail.length):
+                        part = field_path_tail.get(i)
+                        next_typearg = curr_typearg.type_expr.resolved_value.args.withname(part)
+                        curr_typearg = next_typearg
+                    resolved_value = curr_typearg
+                    self._evaluated_typeexpr = resolved_value.type_expr
+            else:
                 # Check if this is actually referring to a function and not a member
-                raise errors.TLException("Invalid field path '%s'" % self.field_path)
+                assert self.field_path.length == 1
+                fname = self.field_path.get(0)
+                self.is_function = True
+                self.root_value = resolved_value = self.resolver.resolve_name(fname)
+                if type(resolved_value) is not Function:
+                    ipdb.set_trace()
+                self._evaluated_typeexpr = resolved_value.func_type
 
 class Function(Expression, tlcore.Annotatable):
     """
@@ -324,8 +326,7 @@ class FunctionCall(Expression):
         # First resolve the expression to get the source function
         self.func_expr.resolve_bindings_and_types(parent_function)
 
-        ipdb.set_trace()
-        func_type = self.func_ref.final_entity
+        func_type = self.func_expr.root_value.func_type
         if not func_type:
             raise errors.TLException("Function '%s' is undefined" % self.func_ref.name)
 
@@ -335,20 +336,19 @@ class FunctionCall(Expression):
         for arg in self.func_args:
             arg.resolve_bindings_and_types(parent_function)
 
-        if len(self.func_args) != func_type.argcount:
+        if len(self.func_args) != func_type.args.count - 1:
             ipdb.set_trace()
             raise errors.TLException("Function '%s' takes %d arguments, but encountered %d" %
-                                            (function.fqn, func_type.argcount, len(self.func_args)))
+                                            (parent_function.fqn, func_type.args.count - 1, len(self.func_args)))
 
         for i in xrange(0, len(self.func_args)):
             arg = self.func_args[i]
-            peg_typeref = arg.evaluated_typeexpr
-            hole_typeref = func_type.arg_at(i).typeref
-            if not tlunifier.can_substitute(peg_typeref.final_entity, hole_typeref.final_entity):
+            peg_type = arg.evaluated_typeexpr.resolved_value
+            hole_type = func_type.args.atindex(i).type_expr.resolved_value
+            if not tlunifier.can_substitute(peg_type, hole_type):
                 ipdb.set_trace()
                 raise errors.TLException("Argument at index %d expected (hole) type (%s), found (peg) type (%s)" % (i, hole_typeref, peg_typeref))
-
-        self._evaluated_typeexpr = func_type.output_typeref
+        self._evaluated_typeexpr = func_type.args[-1].type_expr
 
     @property
     def evaluated_typeexpr(self):
