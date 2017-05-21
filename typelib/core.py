@@ -57,6 +57,9 @@ class TypeParam(TypeExpression):
         self.name = name
         self.parent = parent
 
+    def __repr__(self):
+        return "<TypeParam(%d) - %s>" % (id(self), self.name)
+
     def signature(self, visited = None):
         return self.name
 
@@ -69,6 +72,9 @@ class TypeName(TypeExpression):
     def __init__(self, fqn):
         TypeExpression.__init__(self)
         self.fqn = fqn
+
+    def __repr__(self):
+        return "<TypeName(%d) - %s>" % (id(self), self.fqn)
 
     def signature(self, visited = None):
         return self.fqn
@@ -108,6 +114,8 @@ class TypeFunction(TypeExpression, Annotatable):
         assert all(type(x) in (str, unicode) for x in self._type_params)
         self.args = TypeArgList(type_args)
         self._signature = None
+
+    # def __repr__(self): return "<TypeFunc(%d) - %s/%s<%s>, Args: %s>" % (id(self), self.constructor, self.name, ",".join(self.type_params), map(repr, self.args))
 
     @property
     def is_concrete(self):
@@ -205,17 +213,26 @@ class TypeFunction(TypeExpression, Annotatable):
         return out
     
 class TypeInitializer(TypeExpression):
-    def __init__(self, type_func_name, type_exprs):
+    def __init__(self, type_func_or_name, type_exprs):
         # The name of the type function which will initialize the new type, eg the "map" in map<int, string>
         # This name may be pointing to an unresolved type so this will have to be resolved before
         # a type function is determined
         TypeExpression.__init__(self)
-        self.type_func_name = type_func_name
-        self.type_function = None
+        if type(type_func_or_name) is TypeFunction:
+            self.type_func_name = type_func_or_name.name
+            self.type_function = type_func_or_name
+        else:
+            self.type_func_name = type_func_or_name
+            self.type_function = None
 
         # Each type expression should (eventually) resolve to a Type and will be bound to the respective type.
+        if type(type_exprs) is not list:
+            type_exprs = [type_exprs]
         self.type_exprs = type_exprs
         self._signature = None
+
+    def __repr__(self):
+        return "<TypeInit(%d) - Func: %s, Exprs: [%s]>" % (id(self), self.type_func_name, ", ".join(map(repr, self.type_exprs)))
 
     @property
     def signature(self, visited = None):
@@ -228,7 +245,8 @@ class TypeInitializer(TypeExpression):
 
     def resolve(self):
         """ Resolves all argument expressions and then substitutes the resolved argument into args of the type function. """
-        self.type_function = self.resolver.resolve_type_name(self.type_func_name)
+        if self.type_function is None:
+            self.type_function = self.resolver.resolve_type_name(self.type_func_name)
         assert self.type_function is not None, "Could not resolve type: '%s'" % self.type_func_name
         assert self.type_function.resolved_value is not None
         for expr in self.type_exprs:
@@ -260,6 +278,14 @@ class TypeArg(Annotatable):
         self.is_optional = is_optional
         self.default_value = default_value or None
 
+    def __json__(self, **kwargs):
+        out = {}
+        if self.name:
+            out["name"] = self.name
+        return out
+        
+    # def __repr__(self): return "<TypeArg(%d) - Name: %s>" % (id(self), self.name)
+
 class TypeArgList(object):
     """ A list of type args for a particular type container. """
     def __init__(self, type_args):
@@ -283,10 +309,10 @@ class TypeArgList(object):
                 return i
         return -1
 
-    def arg_for(self, name):
-        return self.arg_at(self.index_for(name))
+    def withname(self, name):
+        return self.atindex(self.index_for(name))
 
-    def arg_at(self, index):
+    def atindex(self, index):
         return None if index < 0 else self._type_args[index]
 
     def contains(self, name):

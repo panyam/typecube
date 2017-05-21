@@ -15,9 +15,6 @@ def can_substitute(peg_type, hole_type):
     if peg_type.constructor != hole_type.constructor:
         return False
 
-    if peg_type.is_sum_type != hole_type.is_sum_type:
-        return False
-
     if peg_type.name != hole_type.name:
         return False
 
@@ -25,14 +22,14 @@ def can_substitute(peg_type, hole_type):
         if peg_type.parent != hole_type.parent:
             return False
 
-        if peg_type.parent.fqn != hole_type.parent.fqn:
+        if peg_type.parent != hole_type.parent:
             return False
 
-    if peg_type.argcount != hole_type.argcount:
+    if peg_type.args.count != hole_type.args.count:
         return False
 
     for arg1,arg2 in izip(peg_type.args, hole_type.args):
-        if not can_substitute(arg1.typeref.final_entity, arg2.typeref.final_entity):
+        if not can_substitute(arg1.type_expr.resolved_value, arg2.type_expr.resolved_value):
             return False
 
     return True
