@@ -6,7 +6,7 @@ from typelib import errors as tlerrors
 from typelib.annotations import Annotatable
 
 def istypeexpr(expr):
-    return issubclass(expr.__class__, TypeExpression)
+    return expr is not None and issubclass(expr.__class__, TypeExpression)
 
 class TypeExpression(object):
     """ An expressions which results in a type or a type expression. 
@@ -181,12 +181,10 @@ class TypeFunction(TypeExpression, Annotatable):
                             expr = type_exprs[index]
                     newarg = TypeArg(arg.name, expr, arg.is_optional, arg.default_value, arg.annotations, arg.docs)
                 new_type_args.append(newarg)
-            elif type(resolved_value) is TypeFunction:
+            else:
+                assert type(resolved_value) is TypeFunction
                 ipdb.set_trace()
                 b = 0
-            else:
-                ipdb.set_trace()
-                c = 0
         return TypeFunction(self.constructor, self.name, new_type_params, new_type_args, self.parent, self.annotations, self.docs)
 
     def signature(self, visited = None):
@@ -273,7 +271,7 @@ class TypeArg(Annotatable):
     """
     def __init__(self, name, type_expr, is_optional = False, default_value = None, annotations = None, docs = ""):
         Annotatable.__init__(self, annotations, docs)
-        assert istypeexpr(type_expr), "TypeExpr type = '%s'" % str(type(type_expr))
+        assert istypeexpr(type_expr), "TypeExpr type = '%s'" % repr(type_expr)
         self.name = name
         self.type_expr = type_expr
         self.is_optional = is_optional
