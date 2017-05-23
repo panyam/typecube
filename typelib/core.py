@@ -143,48 +143,45 @@ class TypeFunction(TypeExpression, Annotatable):
             arg.type_expr.resolved_value
         return self
 
-    def apply(self, type_exprs, ignore = None):
+    def apply(self, substitutions, ignore = None):
         """ Applies the type expressions to the parameters to reify this type function. """
-        assert len(self.type_params) == len(type_exprs), "TypeFunction '%s<%s>' expects %d parameters, but found %d" % (self.name,
-                ", ".join(self.type_params), len(self.type_params), len(type_exprs))
-
         # All substitutions to be applied to the params in this type function
-        subst = {}
+        if type(substitutions) is list:
+            substitutions = {name:expr for name,expr in zip(self.type_params, substitutions) if expr}
         new_type_args = []
-        new_type_params = []
-        for name,expr in zip(self.type_params, type_exprs):
-            if expr:
-                subst[name] = expr
-            else:
-                # This param still remains
-                new_type_params.append(name)
+        new_type_params = self.type_params[:]
+        for index in xrange(len(new_type_params) - 1, -1, -1):
+            if new_type_params[index] not in substitutions:
+                del new_type_params[index]
 
         # If children have param names that match those in this func's param list 
         # then those should be skipped from conversion as those params would have
         # their own bindings.
         if ignore is None:
             ignore = defaultdict(int)
+
         for index,arg in enumerate(self.args):
             resolved_value = arg.type_expr.resolved_value
+            newarg = arg
             if type(resolved_value) is TypeParam:
                 # if this is a param bound to this function then we are good to go
                 # we can make this substitution
-                newarg = arg
                 if resolved_value.name not in ignore:
                     # Make the substitution
-                    expr = arg.type_expr
-                    if arg.name:
-                        if arg.name in subst:
-                            expr = subst[arg.name]
-                    else:
-                        if type_exprs[index] is not None:
-                            expr = type_exprs[index]
+                    expr = substitutions.get(resolved_value.name, arg.type_expr)
+                    # if arg.name and arg.name in subst: expr = substitutions[arg.name]
+                    # elif not arg.name and type_exprs[index] is not None: expr = type_exprs[index]
                     newarg = TypeArg(arg.name, expr, arg.is_optional, arg.default_value, arg.annotations, arg.docs)
-                new_type_args.append(newarg)
             else:
                 assert type(resolved_value) is TypeFunction
-                ipdb.set_trace()
-                b = 0
+                for tp in resolved_value.type_params:
+                    ipdb.set_trace()
+                    ignore[tp] += 1
+                new_tf = resolved_value.apply(substitutions, ignore)
+                for tp in resolved_value.type_params: ignore[tp] -= 1
+                newarg = TypeArg(arg.name, new_tf, arg.is_optional, arg.default_value, arg.annotations, arg.docs)
+            new_type_args.append(newarg)
+
         return TypeFunction(self.constructor, self.name, new_type_params, new_type_args, self.parent, self.annotations, self.docs)
 
     def signature(self, visited = None):
