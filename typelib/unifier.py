@@ -3,32 +3,34 @@ import ipdb
 from core import AnyType
 from itertools import izip
 
-def can_substitute(peg_type, hole_type):
+def can_substitute(peg_typeexpr, hole_typeexpr):
     """
     Returns True if peg_type can fit into a hole_type (ie be substituted for when called as an argument to a function).
     This checks the types recursively.
     """
-    if not peg_type or not hole_type: ipdb.set_trace()
-    if peg_type == hole_type or hole_type == AnyType:
+    if not peg_typeexpr or not hole_typeexpr: ipdb.set_trace()
+    resolved_peg = peg_typeexpr.resolved_value
+    resolved_hole = hole_typeexpr.resolved_value
+    if resolved_peg == resolved_hole or resolved_hole == AnyType:
         return True
 
-    if peg_type.constructor != hole_type.constructor:
+    if resolved_peg.constructor != resolved_hole.constructor:
         return False
 
-    if peg_type.name != hole_type.name:
+    if resolved_peg.name != resolved_hole.name:
         return False
 
-    if peg_type.name:  # if a name was provided then check for parents
-        if peg_type.parent != hole_type.parent:
+    if resolved_peg.name:  # if a name was provided then check for parents
+        if resolved_peg.parent != resolved_hole.parent:
             return False
 
-        if peg_type.parent != hole_type.parent:
-            return False
-
-    if peg_type.args.count != hole_type.args.count:
+    if len(resolved_peg.type_params) != len(resolved_hole.type_params):
         return False
 
-    for arg1,arg2 in izip(peg_type.args, hole_type.args):
+    if resolved_peg.args.count != resolved_hole.args.count:
+        return False
+
+    for arg1,arg2 in izip(resolved_peg.args, resolved_hole.args):
         if not can_substitute(arg1.type_expr.resolved_value, arg2.type_expr.resolved_value):
             return False
 

@@ -1,5 +1,6 @@
 
 import ipdb
+from itertools import izip
 from enum import Enum
 from typelib import errors
 from typelib.utils import FieldPath
@@ -240,10 +241,14 @@ class Function(Expression, tlcore.Annotatable):
     @property
     def dest_typearg(self):
         out = self.func_type.args[-1]
-        if out.type_expr.resolved_value.name == "void":
+        if out.type_expr.resolved_value == tlcore.VoidType:
             return None
         return out
 
+    @property
+    def returns_void(self):
+        dest_typearg = self.func_type.args[-1]
+        return dest_typearg is None or dest_typearg.type_expr.resolved_value == tlcore.VoidType
 
     def add_statement(self, stmt):
         if not isinstance(stmt, Statement):
@@ -265,19 +270,15 @@ class Function(Expression, tlcore.Annotatable):
             for vname, vtype in self.temp_variables.iteritems():
                 yield vname, vtype, True
 
-    def matches_input(self, input_typerefs):
+    def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
-        if type(input_typerefs) is not list:
-            input_types = [input_typerefs]
-        if len(input_typerefs) != len(self.src_fqns):
+        assert type(input_typeexprs) is list
+        if len(input_typeexprs) != len(self.source_typeargs):
             return False
-        source_types = [x.final_entity for x in self.src_typerefs]
-        input_types = [x.final_entity for x in input_typerefs]
-        return all(tlunifier.can_substitute(st, it) for (st,it) in izip(source_types, input_types))
+        return all(tlunifier.can_substitute(st.type_expr, it) for (st,it) in izip(self.source_typeargs, input_typeexprs))
 
-    def matches_output(self, output_type):
-        dest_type = self.dest_typeref.final_entity
-        return tlunifier.can_substitute(output_type, dest_type)
+    def matches_output(self, output_typeexpr):
+        return tlunifier.can_substitute(output_typeexpr, self.dest_typearg.type_expr)
 
     def is_temp_variable(self, varname):
         return varname in self.temp_variables
@@ -363,7 +364,7 @@ class FunctionCall(Expression):
             hole_type = func_type.args.atindex(i).type_expr.resolved_value
             if not tlunifier.can_substitute(peg_type, hole_type):
                 ipdb.set_trace()
-                raise errors.TLException("Argument at index %d expected (hole) type (%s), found (peg) type (%s)" % (i, hole_typeref, peg_typeref))
+                raise errors.TLException("Argument at index %d expected (hole) type (%s), found (peg) type (%s)" % (i, hole_type, peg_type))
         self._evaluated_typeexpr = func_type.args[-1].type_expr
 
     @property
@@ -375,5 +376,5 @@ class FunctionCall(Expression):
                 raise errors.TLException("Output type of function '%s' not known as type inference is requested" % self.func_fqn)
         """
         if self._evaluated_typeexpr is None:
-            self._evaluated_typeexpr = self.func_ref.final_entity.output_typeref
+            self._evaluated_typeexpr = self.func_expr.root_value.dest_typearg.typeexpr
         return self._evaluated_typeexpr

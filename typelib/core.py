@@ -166,7 +166,7 @@ class TypeFunction(TypeExpression, Annotatable):
             if type(resolved_value) is TypeParam:
                 # if this is a param bound to this function then we are good to go
                 # we can make this substitution
-                if resolved_value.name not in ignore:
+                if ignore[resolved_value.name] == 0:
                     # Make the substitution
                     expr = substitutions.get(resolved_value.name, arg.type_expr)
                     # if arg.name and arg.name in subst: expr = substitutions[arg.name]
@@ -174,11 +174,9 @@ class TypeFunction(TypeExpression, Annotatable):
                     newarg = TypeArg(arg.name, expr, arg.is_optional, arg.default_value, arg.annotations, arg.docs)
             else:
                 assert type(resolved_value) is TypeFunction
-                for tp in resolved_value.type_params:
-                    ipdb.set_trace()
-                    ignore[tp] += 1
+                for tp in resolved_value.type_params: ignore[tp.name] += 1
                 new_tf = resolved_value.apply(substitutions, ignore)
-                for tp in resolved_value.type_params: ignore[tp] -= 1
+                for tp in resolved_value.type_params: ignore[tp.name] -= 1
                 newarg = TypeArg(arg.name, new_tf, arg.is_optional, arg.default_value, arg.annotations, arg.docs)
             new_type_args.append(newarg)
 
@@ -248,7 +246,9 @@ class TypeInitializer(TypeExpression):
         for expr in self.type_exprs:
             if expr:
                 assert expr.resolved_value is not None
-        return self.type_function.apply(self.type_exprs)
+        out = self.type_function.apply(self.type_exprs)
+        out.resolver = self.type_function.resolver
+        return out
 
     def set_resolver(self, resolver):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
