@@ -1,6 +1,6 @@
 
 import ipdb
-from core import AnyType
+import core
 from itertools import izip
 
 def can_substitute(peg_typeexpr, hole_typeexpr):
@@ -11,8 +11,13 @@ def can_substitute(peg_typeexpr, hole_typeexpr):
     if not peg_typeexpr or not hole_typeexpr: ipdb.set_trace()
     resolved_peg = peg_typeexpr.resolved_value
     resolved_hole = hole_typeexpr.resolved_value
-    if resolved_peg == resolved_hole or resolved_hole == AnyType:
-        return True
+
+    if resolved_peg == resolved_hole or resolved_hole == core.AnyType: return True
+
+    # if type(resolved_peg) != type(resolved_hole): return False
+
+    if type(resolved_peg) is core.TypeParam or type(resolved_hole) is core.TypeParam:
+        ipdb.set_trace()
 
     if resolved_peg.constructor != resolved_hole.constructor:
         return False

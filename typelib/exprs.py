@@ -260,16 +260,6 @@ class Function(Expression, tlcore.Annotatable):
     def all_statements(self):
         return self._explicit_statements
 
-    def local_variables(self, yield_src = True, yield_dest = True, yield_locals = True):
-        if yield_src:
-            for src_varname, src_typeref in self.source_variables:
-                yield src_varname, src_typeref, False
-        if yield_dest:
-            yield self.dest_varname, self.dest_typeref, False
-        if yield_locals:
-            for vname, vtype in self.temp_variables.iteritems():
-                yield vname, vtype, True
-
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
         assert type(input_typeexprs) is list
@@ -369,12 +359,6 @@ class FunctionCall(Expression):
 
     @property
     def evaluated_typeexpr(self):
-        """
-        if not self.function.output_known:
-            output_typeref = self.function.final_type.output_typeref
-            if not output_typeref or output_typeref.is_unresolved:
-                raise errors.TLException("Output type of function '%s' not known as type inference is requested" % self.func_fqn)
-        """
         if self._evaluated_typeexpr is None:
             self._evaluated_typeexpr = self.func_expr.root_value.dest_typearg.typeexpr
         return self._evaluated_typeexpr
