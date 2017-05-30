@@ -13,7 +13,7 @@ class Expression(object):
     """
     def __init__(self):
         self._evaluated_typeexpr = None
-        self.resolver = None
+        self._resolver = None
         self._resolved_value = None
 
     @property
@@ -27,16 +27,22 @@ class Expression(object):
     def evaluated_typeexpr(self, typeexpr):
         self.set_evaluated_typeexpr(typeexpr)
 
+    @property
+    def resolver(self):
+        if not self._resolver:
+            ipdb.set_trace()
+        return self._resolver
+
     def set_resolver(self, resolver):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
         how to bind/resolve names the expression itself refers.  This step recursively assigns
         a resolver to every entity, expression that needs a resolver.  What the resolver should 
         be and what it should do depends on the child.
         """
-        if self.resolver:
+        if self._resolver and self._resolver != resolver:
             ipdb.set_trace()
             assert False, "Resolver has been set.  Cannot be set again."
-        self.resolver = resolver
+        self._resolver = resolver
 
     @property
     def resolved_value(self):
@@ -48,8 +54,12 @@ class Expression(object):
             self.resolution_finished()
         return self._resolved_value
 
+    def resolution_finished(self):
+        pass
+
     def resolve(self):
         """ This method resolves a type expression to a type object. """
+        ipdb.set_trace()
         assert False, "Not Implemented"
         return self
 
@@ -96,9 +106,10 @@ class Variable(Expression):
             self._evaluated_typeexpr = VoidType
         else:
             # See which of the params we should bind to
-            var_typearg = self.resolver.resolve_name(first)
-
-            if var_typearg:
+            target = self.resolver.resolve_name(first)
+            if target and type(target) is not Function:
+                assert type(target) is TypeArg
+                var_typearg = target
                 self.root_value = var_typearg
                 self._evaluated_typeexpr = var_typearg.type_expr
                 if field_path_tail.length > 0:
@@ -109,7 +120,7 @@ class Variable(Expression):
                         curr_typearg = next_typearg
                     resolved_value = curr_typearg
                     self._evaluated_typeexpr = resolved_value.type_expr
-            else:
+            elif target:
                 # Check if this is actually referring to a function and not a member
                 if self.field_path.length != 1:
                     ipdb.set_trace()
@@ -120,6 +131,9 @@ class Variable(Expression):
                 if type(resolved_value) is not Function:
                     ipdb.set_trace()
                 self._evaluated_typeexpr = resolved_value.func_type
+            else:
+                ipdb.set_trace()
+                assert False
         return self
 
 class Function(Expression, Annotatable):
@@ -174,9 +188,8 @@ class Function(Expression, Annotatable):
 
         # Check local variables
         if self.is_temp_variable(name):
-            return self.temp_var_type(name)
-
-        return None
+            return TypeArg(name, self.temp_var_type(name))
+        return self.resolver.resolve_name(name)
 
     @property
     def source_typeargs(self):
@@ -526,7 +539,7 @@ class TypeInitializer(TypeExpression):
             if expr:
                 assert expr.resolved_value is not None
         out = self.type_function.apply(self.type_exprs)
-        out.resolver = self.type_function.resolver
+        out._resolver = self.type_function.resolver
         return out
 
     def set_resolver(self, resolver):
