@@ -7,9 +7,6 @@ from typelib.utils import FieldPath
 from typelib.annotations import Annotatable
 from typelib import unifier as tlunifier
 
-def istypeexpr(expr):
-    return expr is not None and (issubclass(expr.__class__, TypeExpression) or type(expr) is Variable)
-
 class Expression(object):
     """
     Parent of all expressions.  All expressions must have a value.  Expressions only appear in functions.
@@ -63,59 +60,6 @@ class Expression(object):
 
     def resolve_name(self, name):
         return None if not self.resolver else self.resolver.resolve_name(name)
-
-class Statement(Expression):
-    def __init__(self, expressions, target_variable, is_temporary = False):
-        Expression.__init__(self)
-        self.expressions = expressions
-        self.target_variable = target_variable
-        self.target_variable.is_temporary = is_temporary or target_variable.field_path.get(0) == '_'
-        self.is_implicit = False
-        if self.target_variable.is_temporary:
-            assert target_variable.field_path.length == 1, "A temporary variable cannot have nested field paths"
-
-    @property
-    def is_temporary(self):
-        return self.target_variable and self.target_variable.is_temporary
-
-    def set_resolver(self, resolver, parent_function):
-        """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
-        how to bind/resolve names the expression itself refers.  This step recursively assigns
-        a resolver to every entity, expression that needs a resolver.  What the resolver should 
-        be and what it should do depends on the child.
-        """
-        # Forbid changing of resolvers for now
-        Expression.set_resolver(self, resolver, parent_function)
-        for expr in self.expressions:
-            expr.set_resolver(resolver)
-
-    def resolve(self):
-        """
-        Processes an expressions and resolves name bindings and creating new local vars 
-        in the process if required.
-        """
-        # Resolve the target variable's binding.  This does'nt necessarily have
-        # to evaluate types.
-        # This will help us with type inference going backwards
-        if not self.is_temporary:
-            self.target_variable.resolve_bindings_and_types()
-
-        # Resolve all types in child expressions.  
-        # Apart from just evaluating all child expressions, also make sure
-        # Resolve field paths that should come from source type
-        for expr in self.expressions:
-            expr.resolve_bindings_and_types()
-
-        last_expr = self.expressions[-1]
-        if self.target_variable.is_temporary:
-            varname = str(self.target_variable.field_path)
-            if varname == "_":
-                self.target_variable = None
-            else:
-                # Resolve field paths that should come from dest type
-                self.target_variable.evaluated_typeexpr = last_expr.evaluated_typeexpr
-                parent_function.register_temp_var(varname, last_expr.evaluated_typeexpr)
-        return self
 
 class Variable(Expression):
     """ An occurence of a name that can be bound to a value, a field or a type. """
@@ -191,15 +135,10 @@ class Function(Expression, Annotatable):
         self.parent = parent
         self.name = name
         self.func_type = func_type
+        self.expression = None
         self.is_external = False
         self.dest_varname = "dest" if func_type else None
-
         self.temp_variables = {}
-        # explicit transformer rules
-        self._explicit_statements = []
-
-        # Keeps track of the counts of each type of auto-generated variable.
-        self._vartable = {}
 
     def set_resolver(self, resolver, parent_function):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
@@ -209,8 +148,8 @@ class Function(Expression, Annotatable):
         """
         Expression.set_resolver(self, resolver, self)
         self.func_type.set_resolver(self, self)
-        for statement in self.all_statements:
-            statement.set_resolver(self, self)
+        if self.expression:
+            self.expression.set_resolver(self, self)
 
     @property
     def fqn(self):
@@ -257,16 +196,6 @@ class Function(Expression, Annotatable):
         dest_typearg = self.func_type.args[-1]
         return dest_typearg is None or dest_typearg.type_expr.resolved_value == VoidType
 
-    def add_statement(self, stmt):
-        if not isinstance(stmt, Statement):
-            raise TLException("Transformer rule must be a let statement or a statement, Found: %s" % str(type(stmt)))
-        # Check types and variables in the statements
-        self._explicit_statements.append(stmt)
-
-    @property
-    def all_statements(self):
-        return self._explicit_statements
-
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
         assert type(input_typeexprs) is list
@@ -301,8 +230,7 @@ class Function(Expression, Annotatable):
             2. All expressions have their evaluated types set
         """
         # Now resolve all field paths appropriately
-        for index,statement in enumerate(self.all_statements):
-            statement.resolve_bindings_and_types()
+        self.expression.resolve()
         return self
 
 class FunctionCall(Expression):
@@ -342,7 +270,7 @@ class FunctionCall(Expression):
         in the process if required.
         """
         # First resolve the expression to get the source function
-        self.func_expr.resolve_bindings_and_types()
+        self.func_expr.resolve()
 
         func_type = self.func_expr.root_value.func_type
         if not func_type:
@@ -356,7 +284,7 @@ class FunctionCall(Expression):
         # If it is a variable expression then it needs to be resolved starting from the
         # parent function that holds this statement (along with any other locals and upvals)
         for arg in self.func_args:
-            arg.resolve_bindings_and_types()
+            arg.resolve()
 
         if len(self.func_args) != func_type.args.count - 1:
             ipdb.set_trace()
@@ -378,6 +306,9 @@ class FunctionCall(Expression):
         if self._evaluated_typeexpr is None:
             self._evaluated_typeexpr = self.func_expr.root_value.dest_typearg.typeexpr
         return self._evaluated_typeexpr
+
+def istypeexpr(expr):
+    return expr is not None and (issubclass(expr.__class__, TypeExpression) or type(expr) is Variable)
 
 class TypeExpression(Expression):
     """ An expressions which results in a type or a type expression. 
