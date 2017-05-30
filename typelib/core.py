@@ -14,7 +14,6 @@ class Expression(object):
     def __init__(self):
         self._evaluated_typeexpr = None
         self.resolver = None
-        self.parent_function = None
         self._resolved_value = None
 
     @property
@@ -28,7 +27,7 @@ class Expression(object):
     def evaluated_typeexpr(self, typeexpr):
         self.set_evaluated_typeexpr(typeexpr)
 
-    def set_resolver(self, resolver, parent_function):
+    def set_resolver(self, resolver):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
         how to bind/resolve names the expression itself refers.  This step recursively assigns
         a resolver to every entity, expression that needs a resolver.  What the resolver should 
@@ -38,7 +37,6 @@ class Expression(object):
             ipdb.set_trace()
             assert False, "Resolver has been set.  Cannot be set again."
         self.resolver = resolver
-        self.parent_function = parent_function
 
     @property
     def resolved_value(self):
@@ -140,16 +138,16 @@ class Function(Expression, Annotatable):
         self.dest_varname = "dest" if func_type else None
         self.temp_variables = {}
 
-    def set_resolver(self, resolver, parent_function):
+    def set_resolver(self, resolver):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
         how to bind/resolve names the expression itself refers.  This step recursively assigns
         a resolver to every entity, expression that needs a resolver.  What the resolver should 
         be and what it should do depends on the child.
         """
-        Expression.set_resolver(self, resolver, self)
-        self.func_type.set_resolver(self, self)
+        Expression.set_resolver(self, resolver)
+        self.func_type.set_resolver(self)
         if self.expression:
-            self.expression.set_resolver(self, self)
+            self.expression.set_resolver(self)
 
     @property
     def fqn(self):
@@ -212,7 +210,7 @@ class Function(Expression, Annotatable):
     def temp_var_type(self, varname):
         return self.temp_variables[str(varname)]
 
-    def register_temp_var(self, varname, vartype):
+    def register_temp_var(self, varname, vartype = None):
         assert type(varname) in (str, unicode)
         if varname in (x.name for x in self.func_type.args):
             raise TLException("Duplicate temporary variable '%s'.  Same as source." % varname)
@@ -251,18 +249,18 @@ class FunctionCall(Expression):
         self.func_params = func_param_exprs
         self.func_args = func_args
 
-    def set_resolver(self, resolver, parent_function):
+    def set_resolver(self, resolver):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
         how to bind/resolve names the expression itself refers.  This step recursively assigns
         a resolver to every entity, expression that needs a resolver.  What the resolver should 
         be and what it should do depends on the child.
         """
-        Expression.set_resolver(self, resolver, parent_function)
-        self.func_expr.set_resolver(resolver, parent_function)
+        Expression.set_resolver(self, resolver)
+        self.func_expr.set_resolver(resolver)
         for arg in self.func_args:
-            arg.set_resolver(resolver, parent_function)
+            arg.set_resolver(resolver)
         for param in self.func_params:
-            param.set_resolver(resolver, parent_function)
+            param.set_resolver(resolver)
 
     def resolve(self):
         """
@@ -282,14 +280,14 @@ class FunctionCall(Expression):
 
         # Each of the function arguments is either a variable or a value.  
         # If it is a variable expression then it needs to be resolved starting from the
-        # parent function that holds this statement (along with any other locals and upvals)
+        # function that holds this statement (along with any other locals and upvals)
         for arg in self.func_args:
             arg.resolve()
 
         if len(self.func_args) != func_type.args.count - 1:
             ipdb.set_trace()
             raise errors.TLException("Function '%s' takes %d arguments, but encountered %d" %
-                                            (parent_function.fqn, func_type.args.count - 1, len(self.func_args)))
+                                            (str(func_type), func_type.args.count - 1, len(self.func_args)))
 
         for i in xrange(0, len(self.func_args)):
             arg = self.func_args[i]
@@ -408,13 +406,13 @@ class TypeFunction(TypeExpression, Annotatable):
         # just something lexically scoped but semnatically stored somewhere else?)
         return self.resolver.resolve_type_name(name)
 
-    def set_resolver(self, resolver, parent_function):
+    def set_resolver(self, resolver):
         """ Resolver for children with this function.  This will give them a chance
         to resolve to parameters before globals are searched.
         """
-        TypeExpression.set_resolver(self, resolver, parent_function)
+        TypeExpression.set_resolver(self, resolver)
         for arg in self.args:
-            arg.type_expr.set_resolver(self, parent_function)
+            arg.type_expr.set_resolver(self)
 
     def resolve(self):
         # A TypeFunction resolves to itself
@@ -531,16 +529,16 @@ class TypeInitializer(TypeExpression):
         out.resolver = self.type_function.resolver
         return out
 
-    def set_resolver(self, resolver, parent_function):
+    def set_resolver(self, resolver):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
         how to bind/resolve names the expression itself refers.  This step recursively assigns
         a resolver to every entity, expression that needs a resolver.  What the resolver should 
         be and what it should do depends on the child.
         """
-        TypeExpression.set_resolver(self, resolver, parent_function)
+        TypeExpression.set_resolver(self, resolver)
         for expr in self.type_exprs:
             if expr:
-                expr.set_resolver(resolver, parent_function)
+                expr.set_resolver(resolver)
 
 class TypeArg(Annotatable):
     """ A type argument is a child of a given type.  Akin to a member/field of a type.
