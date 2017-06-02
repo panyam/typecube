@@ -16,7 +16,7 @@ def can_substitute(peg_typeexpr, hole_typeexpr):
 
     # if type(resolved_peg) != type(resolved_hole): return False
 
-    if type(resolved_peg) is core.TypeParam or type(resolved_hole) is core.TypeParam:
+    if type(resolved_peg) is core.Fun or type(resolved_hole) is core.Fun:
         ipdb.set_trace()
 
     if resolved_peg.constructor != resolved_hole.constructor:
@@ -28,9 +28,6 @@ def can_substitute(peg_typeexpr, hole_typeexpr):
     if resolved_peg.name:  # if a name was provided then check for parents
         if resolved_peg.parent != resolved_hole.parent:
             return False
-
-    if len(resolved_peg.type_params) != len(resolved_hole.type_params):
-        return False
 
     if resolved_peg.args.count != resolved_hole.args.count:
         return False

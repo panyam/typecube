@@ -27,6 +27,14 @@ class Expression(object):
     def evaluated_typeexpr(self, typeexpr):
         self.set_evaluated_typeexpr(typeexpr)
 
+    def substitute_with(self, bindings):
+        """ This substitutes a given variable with the expression in the bindings map and returns a
+        copy of this expression.  The current expression itself can be returned if necessary (for 
+        example if no substitutions were found) """
+        return self
+
+    #########
+
     @property
     def resolver(self):
         if not self._resolver:
@@ -39,7 +47,7 @@ class Expression(object):
         a resolver to every entity, expression that needs a resolver.  What the resolver should 
         be and what it should do depends on the child.
         """
-        if self._resolver and self._resolver != resolver:
+        if self._resolver and self._resolver != resolver and self._resolved_value is None:
             ipdb.set_trace()
             assert False, "Resolver has been set.  Cannot be set again."
         self._resolver = resolver
@@ -51,11 +59,10 @@ class Expression(object):
                 ipdb.set_trace()
             assert self.resolver is not None
             self._resolved_value = self.resolve()
-            self.resolution_finished()
+            self.on_resolution_finished()
         return self._resolved_value
 
-    def resolution_finished(self):
-        pass
+    def on_resolution_finished(self): pass
 
     def resolve(self):
         """ This method resolves a type expression to a type object. """
@@ -76,17 +83,29 @@ class Variable(Expression):
         # Whether we are a temporary local var
         self.is_temporary = False
         # Whether a resolved value is a function
+        self.is_type = False
         self.is_function = False
         if type(field_path) in (str, unicode):
             field_path = FieldPath(field_path)
         self.field_path = field_path
         self.root_value = None
-        if type(field_path) is not FieldPath or field_path.length == 0:
-            ipdb.set_trace()
         assert type(field_path) is FieldPath and field_path.length > 0
 
     def __repr__(self):
         return "<VarExp - ID: 0x%x, Value: %s>" % (id(self), str(self.field_path))
+
+    def substitute_with(self, bindings):
+        """ This substitutes a given variable with the expression in the bindings map and returns a
+        copy of this expression.  The current expression itself can be returned if necessary (for 
+        example if no substitutions were found) """
+        first = self.field_path.get(0)
+        if first not in bindings: return self
+
+        # Here if we have a field path that is A/B/C, then we can do the substitution only for A 
+        # and then see if the resultant expression has B/C.
+        # This is too much work, so just prevent a substitution if field path has more than one
+        if self.field_path.length != 1: return self
+        return bindings[first]
 
     def set_evaluated_typeexpr(self, typeexpr):
         if self.is_temporary:
@@ -107,8 +126,14 @@ class Variable(Expression):
         else:
             # See which of the params we should bind to
             target = self.resolver.resolve_name(first)
-            if target and type(target) is not Function:
-                assert type(target) is TypeArg
+            if target is None:
+                ipdb.set_trace()
+                assert target is not None, "Could not result '%s'" % first
+
+            if type(target) is TypeArg:
+                if type(target) is not TypeArg:
+                    ipdb.set_trace()
+                    assert False
                 var_typearg = target
                 self.root_value = var_typearg
                 self._evaluated_typeexpr = var_typearg.type_expr
@@ -120,7 +145,11 @@ class Variable(Expression):
                         curr_typearg = next_typearg
                     resolved_value = curr_typearg
                     self._evaluated_typeexpr = resolved_value.type_expr
-            elif target:
+            elif type(target) is Type:
+                self.is_type = True
+                self.root_value = target
+                self._evaluated_typeexpr = target
+            elif type(target) is Fun:
                 # Check if this is actually referring to a function and not a member
                 if self.field_path.length != 1:
                     ipdb.set_trace()
@@ -128,15 +157,15 @@ class Variable(Expression):
                 fname = self.field_path.get(0)
                 self.is_function = True
                 self.root_value = resolved_value = self.resolver.resolve_name(fname)
-                if type(resolved_value) is not Function:
+                if type(resolved_value) is not Fun:
                     ipdb.set_trace()
                 self._evaluated_typeexpr = resolved_value.func_type
             else:
                 ipdb.set_trace()
                 assert False
-        return self
+        return self.root_value
 
-class Function(Expression, Annotatable):
+class Fun(Expression, Annotatable):
     """
     Defines a function binding along with the mappings to each of the 
     specific backends.
@@ -144,13 +173,58 @@ class Function(Expression, Annotatable):
     def __init__(self, name, func_type, parent, annotations = None, docs = ""):
         Expression.__init__(self)
         Annotatable.__init__(self, annotations, docs)
+        if type(func_type) is not Type:
+            ipdb.set_trace()
+        self._is_type_fun = all([a.type_expr == KindType for a in func_type.args])
         self.parent = parent
         self.name = name
         self.func_type = func_type
         self.expression = None
         self.is_external = False
-        self.dest_varname = "dest" if func_type else None
         self.temp_variables = {}
+
+    def apply(self, args):
+        """ Apply this function's expression to a bunch of arguments and return a resultant expression. """
+        assert len(args) <= len(self.source_typeargs), "Too many arguments provided."
+
+        argnames = (arg.name for arg in self.source_typeargs)
+        bindings = dict(zip(argnames, args))
+        if len(args) < len(self.source_typeargs):
+            # Create a curried function since we have less arguments
+            assert False, "Currying not yet implemented"
+            ipdb.set_trace()
+            new_func_type = self.func_type
+            out = Fun(self.name, new_func_type, self.parent, self.annotations, self.docs)
+            out.expression = FunApp(self, args + [Variable(arg.name) for arg in new_func_type.source_typeargs])
+            return out
+        else:
+            if self.is_external:
+                # Nothing we can do so just return ourself
+                return self
+            else:
+                # Create a curried function
+                out = self.expression.substitute_with(bindings)
+                return out
+
+    def substitute_with(self, bindings):
+        """ Returns a copy of this expression with the variables substituted by those found in the bindings map. """
+        new_bindings = {}
+        for name,expr in bindings.iter_items():
+            if self.is_temp_variable(name): continue
+            if name in (arg.name for arg in self.func_type.args): continue
+            new_bindings[name] = expr
+
+        # No bindings so nothing to replace and copy with
+        if not new_bindings: return self
+
+        new_func_type = self.func_type.substitute_with(substitutions)
+        out = Function(self.name, new_func_type, self.parent, annotations, docs)
+        out.expression = self.expression.substitute_with(substitutions)
+        out.is_external = self.is_external
+        return out
+
+    @property
+    def is_type_fun(self): return self._is_type_fun
 
     def set_resolver(self, resolver):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
@@ -173,18 +247,14 @@ class Function(Expression, Annotatable):
         return out or ""
 
     def __repr__(self):
-        return "<Function(0x%x) %s>" % (id(self), self.name)
+        return "<%s(0x%x) %s>" % (self.__class__.__name__, id(self), self.name)
 
     def resolve_name(self, name):
         """ Try to resolve a name to a local, source or destination variable. """
         # Check source types
-        for src_typearg in self.source_typeargs:
-            if src_typearg.name == name:
-                return src_typearg
-
-        # Check dest type
-        if self.dest_varname == name:
-            return self.dest_typearg
+        for typearg in self.func_type.args:
+            if typearg.name == name:
+                return typearg
 
         # Check local variables
         if self.is_temp_variable(name):
@@ -197,10 +267,11 @@ class Function(Expression, Annotatable):
 
     @property
     def dest_typearg(self):
-        out = self.func_type.args[-1]
-        if out.type_expr.resolved_value == VoidType:
-            return None
-        return out
+        return self.func_type.args[-1]
+
+    @property
+    def returns_void(self):
+        return self.func_type.args[-1] == VoidType
 
     @property
     def returns_void(self):
@@ -226,9 +297,7 @@ class Function(Expression, Annotatable):
     def register_temp_var(self, varname, vartype = None):
         assert type(varname) in (str, unicode)
         if varname in (x.name for x in self.func_type.args):
-            raise TLException("Duplicate temporary variable '%s'.  Same as source." % varname)
-        elif varname == self.dest_varname:
-            raise TLException("Duplicate temporary variable '%s'.  Same as target." % varname)
+            raise TLException("Duplicate temporary variable '%s'.  Same as function arguments." % varname)
         elif self.is_temp_variable(varname) and self.temp_variables[varname] is not None:
             raise TLException("Duplicate temporary variable declared: '%s'" % varname)
         self.temp_variables[varname] = vartype
@@ -244,9 +313,9 @@ class Function(Expression, Annotatable):
         self.expression.resolve()
         return self
 
-class FunctionCall(Expression):
+class FunApp(Expression):
     """
-    An expression for denoting a function call.  Function calls can only be at the start of a expression stream, eg;
+    An expression for denoting a function call.  Fun calls can only be at the start of a expression stream, eg;
 
     f(x,y,z) => H => I => J
 
@@ -256,11 +325,25 @@ class FunctionCall(Expression):
 
     because f(x,y,z) must return an observable and observable returns are not supported (yet).
     """
-    def __init__(self, func_expr, func_param_exprs = None, func_args = None):
-        super(FunctionCall, self).__init__()
+    def __init__(self, func_expr, func_args = None, is_type_app = False):
+        super(FunApp, self).__init__()
+        self._is_type_app = is_type_app 
         self.func_expr = func_expr
-        self.func_params = func_param_exprs
+        if func_args and type(func_args) is not list:
+            func_args = [func_args]
         self.func_args = func_args
+
+    def substitute_with(self, bindings):
+        """ This substitutes a given function application with the expression in the bindings map 
+        and returns a copy of this expression.  The current expression itself can be returned if 
+        necessary (for example if no substitutions were found) """
+
+        new_func_args = [arg.substitute_with(bindings) for arg in self.func_args]
+        out = FunApp(func_expr.substitute_with(bindings), new_func_args, self.is_type_app)
+        return out
+
+    @property
+    def is_type_app(self): return self._is_type_app
 
     def set_resolver(self, resolver):
         """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
@@ -272,8 +355,6 @@ class FunctionCall(Expression):
         self.func_expr.set_resolver(resolver)
         for arg in self.func_args:
             arg.set_resolver(resolver)
-        for param in self.func_params:
-            param.set_resolver(resolver)
 
     def resolve(self):
         """
@@ -281,15 +362,13 @@ class FunctionCall(Expression):
         in the process if required.
         """
         # First resolve the expression to get the source function
+        # Here we need to decide if the function needs to be "duplicated" for each different type
+        # This is where type re-ification is important - both at buildtime and runtime
         self.func_expr.resolve()
-
-        func_type = self.func_expr.root_value.func_type
-        if not func_type:
-            raise errors.TLException("Function '%s' is undefined" % self.func_ref.name)
-
-        # Each func param is a type expression
-        for arg in self.func_params:
-            arg.resolved_value
+        if not self.func_expr.resolved_value:
+            raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
+        if type(self.func_expr.resolved_value) is not Fun:
+            raise errors.TLException("Fun '%s' is not a function" % (self.func_expr))
 
         # Each of the function arguments is either a variable or a value.  
         # If it is a variable expression then it needs to be resolved starting from the
@@ -297,20 +376,32 @@ class FunctionCall(Expression):
         for arg in self.func_args:
             arg.resolve()
 
-        if len(self.func_args) != func_type.args.count - 1:
-            ipdb.set_trace()
-            raise errors.TLException("Function '%s' takes %d arguments, but encountered %d" %
-                                            (str(func_type), func_type.args.count - 1, len(self.func_args)))
+        function = self.func_expr.resolved_value
+        if len(self.func_args) != len(function.source_typeargs):
+            raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d" %
+                                            (str(func_type), len(function.source_typeargs), len(self.func_args)))
 
-        for i in xrange(0, len(self.func_args)):
-            arg = self.func_args[i]
-            peg_type = arg.evaluated_typeexpr.resolved_value
-            hole_type = func_type.args.atindex(i).type_expr.resolved_value
-            if not tlunifier.can_substitute(peg_type, hole_type):
+        if function.is_type_fun:
+            if not self.is_type_app:
                 ipdb.set_trace()
-                raise errors.TLException("Argument at index %d expected (hole) type (%s), found (peg) type (%s)" % (i, hole_type, peg_type))
-        self._evaluated_typeexpr = func_type.args[-1].type_expr
-        return self
+            assert self.is_type_app
+            ipdb.set_trace()
+            out = function.apply(self.func_args)
+            out.set_resolver(self.resolver)
+            return out
+        else:
+            for i,arg in enumerate(self.func_args):
+                peg_type = arg.evaluated_typeexpr.resolved_value
+                hole_type = function.source_typeargs[i].type_expr.resolved_value
+                if not tlunifier.can_substitute(peg_type, hole_type):
+                    ipdb.set_trace()
+                    raise errors.TLException("Argument at index %d expected (hole) type (%s), found (peg) type (%s)" % (i, hole_type, peg_type))
+            self._evaluated_typeexpr = function.dest_typearg.type_expr
+            if function.is_type_fun:
+                assert self.is_type_app
+                ipdb.set_trace()
+                # TODO: reify this type?
+            return self
 
     @property
     def evaluated_typeexpr(self):
@@ -318,63 +409,15 @@ class FunctionCall(Expression):
             self._evaluated_typeexpr = self.func_expr.root_value.dest_typearg.typeexpr
         return self._evaluated_typeexpr
 
-def istypeexpr(expr):
-    return expr is not None and (issubclass(expr.__class__, TypeExpression) or type(expr) is Variable)
+def TypeFun(name, type_params, expression, parent, annotations = None, docs = ""):
+    func_type = make_func_type(name, [TypeArg(tp,KindType) for tp in type_params], KindType)
+    # The shell/wrapper function that will return a copy of the given expression bound to values in here.
+    out = Fun(name, func_type, parent = parent, annotations = annotations, docs = docs)
+    out.expression = expression
+    return out
 
-class TypeExpression(Expression):
-    """ An expressions which results in a type or a type expression. 
-    This is the window to all types that are either available or must be lazily evaluated.
-    """
-    def __init__(self):
-        # The symbol resolver is responsible for resolving names that an expression refers to.
-        # Note that this does not prohibit any form of late binding as the assumption is that 
-        # the scope where an expression exists, usually refers to some environment that should
-        # have interface declarations (via the resolver) of types it refers to.
-        Expression.__init__(self)
-
-    def signature(self, visited = None):
-        assert False, "Not Implemented"
-
-    def resolution_finished(self):
-        if self._resolved_value is None or not type(self._resolved_value) in (TypeParam, TypeFunction):
-            ipdb.set_trace()
-            assert False, "Invalid resolved value type: '%s'" % repr(self._resolved_value)
-
-class TypeParam(TypeExpression):
-    def __init__(self, name, parent):
-        TypeExpression.__init__(self)
-        self.name = name
-        self.parent = parent
-
-    def __repr__(self):
-        return "<TypeParam(%d) - %s>" % (id(self), self.name)
-
-    def signature(self, visited = None):
-        return self.name
-
-    def resolve(self):
-        # A type parameter can only resolve to itself - and only be replaced upon a substitution
-        return self
-
-class TypeVariable(TypeExpression):
-    """ A type variable used in a type expression. """
-    def __init__(self, fqn):
-        TypeExpression.__init__(self)
-        self.fqn = fqn
-
-    def __repr__(self):
-        return "<TypeVar(%d) - %s>" % (id(self), self.fqn)
-
-    def signature(self, visited = None):
-        return self.fqn
-
-    def resolve(self):
-        """ This method resolves a type expression to a type object. """
-        value = self.resolver.resolve_type_name(self.fqn)
-        return value
-
-class TypeFunction(TypeExpression, Annotatable):
-    def __init__(self, constructor, name, type_params, type_args, parent, annotations = None, docs = ""):
+class Type(Expression, Annotatable):
+    def __init__(self, constructor, name, type_args, parent, annotations = None, docs = ""):
         """
         Creates a new type function.  Type functions are responsible for creating concrete type instances
         or other (curried) type functions.
@@ -383,96 +426,42 @@ class TypeFunction(TypeExpression, Annotatable):
             constructor     The type's constructor, eg "record", "int" etc.  This is not the name 
                             of the type itself but a name that indicates a class of this type.
             name            Name of the type.
-            type_params     Parameters for the type.  This is of type array<TypeParam>.
-            type_args       Type arguments are fields/children of a given type and are themselves expressions
-                            over either type_params or unbound variables or other type expressions.
+            type_args       Type arguments are fields/children of a given type are themselves expressions 
+                            (whose final type must be of Type).
             parent          A reference to the parent container entity of this type.
             annotations     Annotations applied to the type.
             docs            Documentation string for the type.
         """
         Annotatable.__init__(self, annotations = annotations, docs = docs)
-        TypeExpression.__init__(self)
+        Expression.__init__(self)
 
         if type(constructor) not in (str, unicode):
             raise errors.TLException("constructor must be a string")
 
+        self._resolved_value = self
         self.constructor = constructor
         self.parent = parent
         self.name = name
-        self._type_params = type_params or []
-        assert all(type(x) in (str, unicode) for x in self._type_params)
         self.args = TypeArgList(type_args)
         self._signature = None
 
-    # def __repr__(self): return "<TypeFunc(%d) - %s/%s<%s>, Args: %s>" % (id(self), self.constructor, self.name, ",".join(self.type_params), map(repr, self.args))
-
-    @property
-    def is_concrete(self):
-        return len(self._type_params) == 0 and all(self.args)
-
-    def resolve_type_name(self, name):
-        if name in self.type_params:
-            return TypeParam(name, self)
-
-        # if we cannot bind to a var then send to parent
-        # This may change if we allow inner types (but is that really a "child" type or 
-        # just something lexically scoped but semnatically stored somewhere else?)
-        return self.resolver.resolve_type_name(name)
+    def substitute_with(self, bindings):
+        new_args = [arg.substitute_with(bindings) for arg in self.args]
+        return Type(self.constructor, self.name, new_args, self.parent, self.annotations, self.docs)
 
     def set_resolver(self, resolver):
         """ Resolver for children with this function.  This will give them a chance
         to resolve to parameters before globals are searched.
         """
-        TypeExpression.set_resolver(self, resolver)
+        Expression.set_resolver(self, resolver)
         for arg in self.args:
             arg.type_expr.set_resolver(self)
 
     def resolve(self):
-        # A TypeFunction resolves to itself
-        if not self.type_params and self.name == "map":
-            ipdb.set_trace()
+        # A Type resolves to itself
         for index,arg in enumerate(self.args):
             arg.type_expr.resolved_value
         return self
-
-    def apply(self, substitutions, ignore = None):
-        """ Applies the type expressions to the parameters to reify this type function. """
-        # All substitutions to be applied to the params in this type function
-        if type(substitutions) is list:
-            substitutions = {name:expr for name,expr in zip(self.type_params, substitutions) if expr}
-        new_type_args = []
-        new_type_params = self.type_params[:]
-        for index in xrange(len(new_type_params) - 1, -1, -1):
-            if new_type_params[index] not in substitutions:
-                del new_type_params[index]
-
-        # If children have param names that match those in this func's param list 
-        # then those should be skipped from conversion as those params would have
-        # their own bindings.
-        if ignore is None:
-            ignore = defaultdict(int)
-
-        for index,arg in enumerate(self.args):
-            resolved_value = arg.type_expr.resolved_value
-            newarg = arg
-            if type(resolved_value) is TypeParam:
-                # if this is a param bound to this function then we are good to go
-                # we can make this substitution
-                if ignore[resolved_value.name] == 0:
-                    # Make the substitution
-                    expr = substitutions.get(resolved_value.name, arg.type_expr)
-                    # if arg.name and arg.name in subst: expr = substitutions[arg.name]
-                    # elif not arg.name and type_exprs[index] is not None: expr = type_exprs[index]
-                    newarg = TypeArg(arg.name, expr, arg.is_optional, arg.default_value, arg.annotations, arg.docs)
-            else:
-                assert type(resolved_value) is TypeFunction
-                for tp in resolved_value.type_params: ignore[tp.name] += 1
-                new_tf = resolved_value.apply(substitutions, ignore)
-                for tp in resolved_value.type_params: ignore[tp.name] -= 1
-                newarg = TypeArg(arg.name, new_tf, arg.is_optional, arg.default_value, arg.annotations, arg.docs)
-            new_type_args.append(newarg)
-
-        return TypeFunction(self.constructor, self.name, new_type_params, new_type_args, self.parent, self.annotations, self.docs)
 
     def signature(self, visited = None):
         if not self._signature:
@@ -482,9 +471,6 @@ class TypeFunction(TypeExpression, Annotatable):
             if self.args:
                 self._signature += "(" + ", ".join([t.type_expr.signature(visited) for t in self.args]) + ")"
         return self._signature
-
-    @property
-    def type_params(self): return self._type_params
 
     def __json__(self, **kwargs):
         out = {}
@@ -497,70 +483,11 @@ class TypeFunction(TypeExpression, Annotatable):
         if self.args:
             out["args"] = [arg.json(**kwargs) for arg in self.args]
         return out
-    
-class TypeInitializer(TypeExpression):
-    def __init__(self, type_func_or_name, type_exprs):
-        # The name of the type function which will initialize the new type, eg the "map" in map<int, string>
-        # This name may be pointing to an unresolved type so this will have to be resolved before
-        # a type function is determined
-        TypeExpression.__init__(self)
-        if type(type_func_or_name) is TypeFunction:
-            self.type_func_name = type_func_or_name.name
-            self.type_function = type_func_or_name
-        else:
-            self.type_func_name = type_func_or_name
-            self.type_function = None
-
-        # Each type expression should (eventually) resolve to a Type and will be bound to the respective type.
-        if type(type_exprs) is not list:
-            type_exprs = [type_exprs]
-        self.type_exprs = type_exprs
-        self._signature = None
-
-    def __repr__(self):
-        return "<TypeInit(%d) - Func: %s, Exprs: [%s]>" % (id(self), self.type_func_name, ", ".join(map(repr, self.type_exprs)))
-
-    @property
-    def signature(self, visited = None):
-        if not self._signature:
-            if visited is None: visited = set()
-            self._signature = self.type_func_name
-            if self.type_exprs:
-                self._signature += "<" + ', '.join(t.signature(visited) for t in self.type_exprs) + ">"
-        return self._signature
-
-    def resolve(self):
-        """ Resolves all argument expressions and then substitutes the resolved argument into args of the type function. """
-        if self.type_function is None:
-            self.type_function = self.resolver.resolve_type_name(self.type_func_name)
-        assert self.type_function is not None, "Could not resolve type: '%s'" % self.type_func_name
-        assert self.type_function.resolved_value is not None
-        for expr in self.type_exprs:
-            if expr:
-                assert expr.resolved_value is not None
-        out = self.type_function.apply(self.type_exprs)
-        out._resolver = self.type_function.resolver
-        return out
-
-    def set_resolver(self, resolver):
-        """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
-        how to bind/resolve names the expression itself refers.  This step recursively assigns
-        a resolver to every entity, expression that needs a resolver.  What the resolver should 
-        be and what it should do depends on the child.
-        """
-        TypeExpression.set_resolver(self, resolver)
-        for expr in self.type_exprs:
-            if expr:
-                expr.set_resolver(resolver)
 
 class TypeArg(Annotatable):
-    """ A type argument is a child of a given type.  Akin to a member/field of a type.
-    These are either names of a type (yet to be bound) or another TypeFunction that 
-    must be evaluated to create the type of this argument, or a TypeInitializer
-    """
+    """ A type argument is a child of a given type.  Akin to a member/field of a type.  """
     def __init__(self, name, type_expr, is_optional = False, default_value = None, annotations = None, docs = ""):
         Annotatable.__init__(self, annotations, docs)
-        assert istypeexpr(type_expr), "TypeExpr type = '%s'" % repr(type_expr)
         self.name = name
         self.type_expr = type_expr
         self.is_optional = is_optional
@@ -571,8 +498,10 @@ class TypeArg(Annotatable):
         if self.name:
             out["name"] = self.name
         return out
-        
-    # def __repr__(self): return "<TypeArg(%d) - Name: %s>" % (id(self), self.name)
+
+    def substitute_with(self, bindings):
+        new_expr = self.type_expr.substitute_with(bindings)
+        return TypeArg(self.name, new_expr, self.is_optional, self.default_value, self.annotations, self.docs)
 
 class TypeArgList(object):
     """ A list of type args for a particular type container. """
@@ -610,7 +539,9 @@ class TypeArgList(object):
         """
         Add an argument type.
         """
-        if istypeexpr(arg):
+        if type(arg) in (str, unicode):
+            arg = Variable(arg)
+        if issubclass(arg.__class__, Expression):
             arg = TypeArg(None, arg)
         elif not isinstance(arg, TypeArg):
             raise errors.TLException("Argument must be a TypeArg. Found: '%s'" % type(arg))
@@ -621,28 +552,25 @@ class TypeArgList(object):
                 raise errors.TLException("Child type by the given name '%s' already exists" % arg.name)
         self._type_args.append(arg)
 
-def make_type(constructor, name, type_params, type_args, parent = None, annotations = None, docs = ""):
-    return TypeFunction(constructor, name, type_params = type_params, type_args = type_args,
-                        parent = parent, annotations = annotations, docs = docs)
+def make_type(constructor, name, type_args, parent = None, annotations = None, docs = ""):
+    return Type(constructor, name, type_args = type_args,
+                 parent = parent, annotations = annotations, docs = docs)
 
 def make_literal_type(name, parent = None, annotations = None, docs = ""):
-    return make_type("literal", name, type_params = None, type_args = None,
+    return make_type("literal", name, type_args = None, parent = parent, annotations = annotations, docs = docs)
+
+def make_func_type(name, type_args, output_arg, parent = None, annotations = None, docs = ""):
+    return make_type("function", name, type_args + [output_arg],
                      parent = parent, annotations = annotations, docs = docs)
 
-def make_wrapper_type(name, type_params, parent = None, annotations = None, docs = ""):
-    type_args = [TypeParam(param, None) for param in type_params]
-    out = TypeFunction("extern", name, type_params = type_params, type_args = type_args,
-                        parent = parent, annotations = annotations, docs = docs)
-    for ta in type_args: ta.parent = out
-    return out
-
-def make_func_type(name, type_params, type_args, output_arg, parent = None, annotations = None, docs = ""):
-    return TypeFunction("function", name, type_params = type_params, type_args = type_args + [output_arg],
-                        parent = parent, annotations = annotations, docs = docs)
-
-def make_typeref(name, type_params, type_expr, parent = None, annotations = None, docs = ""):
-    return make_type("typeref", name, type_params = type_params, type_args = [type_expr],
+def make_typeref(name, type_expr, parent = None, annotations = None, docs = ""):
+    return make_type("typeref", name, type_args = [type_expr],
                      parent = parent, annotations = annotations, docs = docs)
 
+def make_extern_type(name, type_args, parent = None, annotations = None, docs = ""):
+    return make_type("extern", name, type_args = type_args,
+                     parent = parent, annotations = annotations, docs = docs)
+
+KindType = make_literal_type("Type")
 AnyType = make_literal_type("any")
 VoidType = make_literal_type("void")

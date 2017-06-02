@@ -9,7 +9,7 @@ def EnumSymbol(name, parent, value = None, annotations = None, docs = ""):
     return out
 
 def EnumType(name, parent, symbols = None, type_args = None, annotations = None, docs = None):
-    out = core.make_type("enum", name, parent, type_args = type_args, annotations = annotations, docs = docs)
+    out = core.make_type("enum", name, type_args, parent, annotations = annotations, docs = docs)
     for symbol in symbols or []:
         out.args.add(core.TypeArg(symbol.name, symbol))
     return out

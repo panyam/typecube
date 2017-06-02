@@ -14,8 +14,8 @@ LongType = tlcore.make_literal_type("long")
 FloatType = tlcore.make_literal_type("float")
 DoubleType = tlcore.make_literal_type("double")
 StringType = tlcore.make_literal_type("string")
-MapType = tlcore.make_wrapper_type("map", ["K", "V"])
-ArrayType = tlcore.make_wrapper_type("array", ["V"])
+MapType = tlcore.TypeFun("map", ["K", "V"], tlcore.make_extern_type("map", ["K", "V"]), None)
+ArrayType = tlcore.TypeFun("array", ["V"], tlcore.make_extern_type("array", ["V"]), None)
 
 class Assignment(Expression):
     def __init__(self, parent_function, target_variable, expression, is_temporary = False):
@@ -123,7 +123,7 @@ class DictExpression(Expression):
             value.resolve()
 
         # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
-        self._evaluated_typeexpr = tlcore.TypeInitializer(MapType, tlcore.AnyType, tlcore.AnyType)
+        self._evaluated_typeexpr = tlcore.FunApp(MapType, [tlcore.AnyType, tlcore.AnyType], is_type_app = True)
         self._evaluated_typeexpr.set_resolver(self.resolver)
         return self
 
@@ -145,7 +145,7 @@ class ListExpression(Expression):
         for expr in self.values: expr.resolve()
 
         # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
-        self._evaluated_typeexpr = tlcore.TypeInitializer(ArrayType, tlcore.AnyType)
+        self._evaluated_typeexpr = tlcore.FunApp(ArrayType, tlcore.AnyType, is_type_app = True)
         self._evaluated_typeexpr._resolver = self.resolver
         return self
 
@@ -167,7 +167,7 @@ class TupleExpression(Expression):
         for expr in self.values: expr.resolve()
 
         # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
-        self._evaluated_typeexpr = tlcore.TypeInitializer(TupleType, tlcore.AnyType)
+        self._evaluated_typeexpr = tlcore.FunApp(TupleType, tlcore.AnyType, is_type_app = True)
         self._evaluated_typeexpr._resolver = self.resolver
         return self
 
