@@ -231,7 +231,7 @@ class Fun(Expression, Annotatable):
 
     @property
     def returns_void(self):
-        return self.func_type.output_arg and self.func_type.output_arg.type_expr == VoidType
+        return self.func_type.output_arg is None or self.func_type.output_arg.type_expr == VoidType
 
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
