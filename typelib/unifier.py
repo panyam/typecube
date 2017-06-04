@@ -9,6 +9,7 @@ def can_substitute(peg_typeexpr, hole_typeexpr):
     This checks the types recursively.
     """
     if not peg_typeexpr or not hole_typeexpr: ipdb.set_trace()
+    ipdb.set_trace()
     resolved_peg = peg_typeexpr.resolved_value
     resolved_hole = hole_typeexpr.resolved_value
 
