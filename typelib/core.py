@@ -28,12 +28,6 @@ class Expression(object):
     def __init__(self):
         pass
 
-    def substitute_with(self, bindings):
-        """ This substitutes a given variable with the expression in the bindings map and returns a
-        copy of this expression.  The current expression itself can be returned if necessary (for 
-        example if no substitutions were found) """
-        return self
-
     #########
 
     def evaltype(self, resolver_stack):
@@ -88,19 +82,6 @@ class Variable(Expression):
     def __repr__(self):
         return "<VarExp - ID: 0x%x, Value: %s>" % (id(self), str(self.field_path))
 
-    def substitute_with(self, bindings):
-        """ This substitutes a given variable with the expression in the bindings map and returns a
-        copy of this expression.  The current expression itself can be returned if necessary (for 
-        example if no substitutions were found) """
-        first = self.field_path.get(0)
-        if first not in bindings: return self
-
-        # Here if we have a field path that is A/B/C, then we can do the substitution only for A 
-        # and then see if the resultant expression has B/C.
-        # This is too much work, so just prevent a substitution if field path has more than one
-        if self.field_path.length != 1: return self
-        return bindings[first]
-
     def _evaltype(self, resolver_stack):
         resolved = self.resolve(resolver_stack)
         if type(resolved) is Type:
@@ -130,7 +111,7 @@ class Fun(Expression, Annotatable):
     Defines a function binding along with the mappings to each of the 
     specific backends.
     """
-    def __init__(self, name, func_type, parent, annotations = None, docs = ""):
+    def __init__(self, name, func_type, expression, parent, annotations = None, docs = ""):
         Expression.__init__(self)
         Annotatable.__init__(self, annotations, docs)
         if type(func_type) is not Type:
@@ -139,32 +120,11 @@ class Fun(Expression, Annotatable):
         self.parent = parent
         self.name = name
         self.func_type = func_type
-        self.expression = None
+        self.expression = expression
         self.temp_variables = {}
 
     @property
     def is_external(self): return self.expression is None
-
-    def _resolve(self, resolver_stack):
-        """
-        The main resolver method.  This should take care of the following:
-
-            1. Ensure field paths are correct
-            2. All expressions have their evaluated types set
-        """
-        if resolver_stack == None:
-            resolver_stack = ResolverStack(self.parent, None)
-        resolver_stack = resolver_stack.push(self)
-        func_type = self.func_type.resolve(resolver_stack)
-        resolved_expr = None if not self.expression else self.expression.resolve(resolver_stack)
-        if func_type == self.func_type and resolved_expr == self.expression:
-            return self
-        out = Fun(self.name, func_type, self.parent, self.annotations, self.docs)
-        out.expression = resolved_expr
-        return out
-
-    def _evaltype(self, resolver_stack):
-        return self.resolve(resolver_stack).func_type
 
     def resolve_name(self, name):
         """ Try to resolve a name to a local, source or destination variable. """
@@ -184,11 +144,11 @@ class Fun(Expression, Annotatable):
 
         if out_typearg:
             if out_typearg.type_expr == KindType:
-                ipdb.set_trace()
-                return None
+                # TODO: *something?*
+                pass
         return out_typearg
 
-    def apply(self, args):
+    def apply(self, args, resolver_stack):
         """ Apply this function's expression to a bunch of arguments and return a resultant expression. """
         assert len(args) <= len(self.source_typeargs), "Too many arguments provided."
 
@@ -200,8 +160,8 @@ class Fun(Expression, Annotatable):
             ipdb.set_trace()
 
             new_func_type = self.func_type
-            out = Fun(self.name, new_func_type, self.parent, self.annotations, self.docs)
-            out.expression = FunApp(self, args + [Variable(arg.name) for arg in new_func_type.source_typeargs])
+            new_expression = FunApp(self, args + [Variable(arg.name) for arg in new_func_type.source_typeargs])
+            out = Fun(self.name, new_func_type, new_expression, self.parent, self.annotations, self.docs)
             return out
         else:
             if self.is_external:
@@ -212,22 +172,25 @@ class Fun(Expression, Annotatable):
                 out = self.expression.substitute_with(bindings)
                 return out
 
-    def substitute_with(self, bindings):
-        """ Returns a copy of this expression with the variables substituted by those found in the bindings map. """
-        new_bindings = {}
-        for name,expr in bindings.iter_items():
-            if self.is_temp_variable(name): continue
-            if name in (arg.name for arg in self.func_type.args): continue
-            new_bindings[name] = expr
+    def _resolve(self, resolver_stack):
+        """
+        The main resolver method.  This should take care of the following:
 
-        # No bindings so nothing to replace and copy with
-        if not new_bindings: return self
-
-        new_func_type = self.func_type.substitute_with(substitutions)
-        out = Function(self.name, new_func_type, self.parent, annotations, docs)
-        out.expression = self.expression.substitute_with(substitutions)
-        out.is_external = self.is_external
+            1. Ensure field paths are correct
+            2. All expressions have their evaluated types set
+        """
+        if resolver_stack == None:
+            resolver_stack = ResolverStack(self.parent, None)
+        resolver_stack = resolver_stack.push(self)
+        new_func_type = self.func_type.resolve(resolver_stack)
+        resolved_expr = None if not self.expression else self.expression.resolve(resolver_stack)
+        if new_func_type == self.func_type and resolved_expr == self.expression:
+            return self
+        out = Fun(self.name, new_func_type, resolved_expr, self.parent, self.annotations, self.docs)
         return out
+
+    def _evaltype(self, resolver_stack):
+        return self.resolve(resolver_stack).func_type
 
     @property
     def is_type_fun(self): return self._is_type_fun
@@ -288,14 +251,8 @@ class FunApp(Expression):
             func_args = [func_args]
         self.func_args = func_args
 
-    def substitute_with(self, bindings):
-        """ This substitutes a given function application with the expression in the bindings map 
-        and returns a copy of this expression.  The current expression itself can be returned if 
-        necessary (for example if no substitutions were found) """
-
-        new_func_args = [arg.substitute_with(bindings) for arg in self.func_args]
-        out = FunApp(func_expr.substitute_with(bindings), new_func_args, self.is_type_app)
-        return out
+    def __repr__(self):
+        return "<FunApp(0x%x) Expr = %s, Args = (%s)>" % (id(self), repr(self.func_expr), ", ".join(map(repr, self.func_args)))
 
     @property
     def is_type_app(self): return self._is_type_app
@@ -324,9 +281,9 @@ class FunApp(Expression):
 
         if function.is_type_fun:
             assert self.is_type_app
+            arg_values = [arg.resolve(resolver) for arg in self.func_args]
             if str(self.func_expr.field_path).endswith("StripeValueResponse"):
                 ipdb.set_trace()
-            arg_values = [arg.resolve(resolver) for arg in self.func_args]
             return function.apply(arg_values)
         else:
             arg_values = [arg.resolve(resolver) for arg in self.func_args]
@@ -345,9 +302,7 @@ class FunApp(Expression):
 def TypeFun(name, type_params, expression, parent, annotations = None, docs = ""):
     func_type = make_func_type(name, [TypeArg(tp,KindType) for tp in type_params], KindType)
     # The shell/wrapper function that will return a copy of the given expression bound to values in here.
-    out = Fun(name, func_type, parent = parent, annotations = annotations, docs = docs)
-    out.expression = expression
-    return out
+    return Fun(name, func_type, expression, parent, annotations = annotations, docs = docs)
 
 class Type(Expression, Annotatable):
     def __init__(self, constructor, name, type_args, output_arg, parent, annotations = None, docs = ""):
@@ -382,13 +337,6 @@ class Type(Expression, Annotatable):
     def _evaltype(self, resolver_stack):
         """ Type of a "Type" is a KindType!!! """
         return KindType
-
-    def substitute_with(self, bindings):
-        new_args = [arg.substitute_with(bindings) for arg in self.args]
-        new_output_arg = None
-        if self.output_arg:
-            new_output_arg = self.output_arg.substitute_with(bindings)
-        return Type(self.constructor, self.name, new_args, new_output_arg, self.parent, self.annotations, self.docs)
 
     def _resolve(self, resolver_stack):
         # A Type resolves to itself
@@ -448,10 +396,6 @@ class TypeArg(Expression, Annotatable):
         if new_expr != self.type_expr:
             out =  TypeArg(self.name, new_expr, self.is_optional, self.docs, annotations = self.annotations, docs = self.docs)
         return out
-
-    def substitute_with(self, bindings):
-        new_expr = self.type_expr.substitute_with(bindings)
-        return TypeArg(self.name, new_expr, self.is_optional, self.default_value, self.annotations, self.docs)
 
     def unwrap_with_field_path(self, full_field_path, resolver_stack):
         starting_var, field_path = full_field_path.pop()
