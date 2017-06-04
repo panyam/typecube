@@ -18,31 +18,17 @@ MapType = tlcore.TypeFun("map", ["K", "V"], tlcore.make_extern_type("map", ["K",
 ArrayType = tlcore.TypeFun("array", ["V"], tlcore.make_extern_type("array", ["V"]), None)
 
 class Assignment(Expression):
-    def __init__(self, parent_function, target_variable, expression, is_temporary = False):
+    def __init__(self, parent_function, target_variable, expression):
         Expression.__init__(self)
         self.parent_function = parent_function
         self.target_variable = target_variable
-        self.target_variable.is_temporary = is_temporary or target_variable.field_path.get(0) == '_'
         self.expression = expression
-        if self.target_variable.is_temporary:
-            assert target_variable.field_path.length == 1, "A temporary variable cannot have nested field paths"
 
-    @property
-    def is_temporary(self):
-        return self.target_variable and self.target_variable.is_temporary
+    def _evaltype(self, resolver_stack):
+        resolved_expr = self.expression.resolve(resolver_stack)
+        return resolved_expr.evaltype(resolver_stack)
 
-    def set_resolver(self, resolver):
-        """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
-        how to bind/resolve names the expression itself refers.  This step recursively assigns
-        a resolver to every entity, expression that needs a resolver.  What the resolver should 
-        be and what it should do depends on the child.
-        """
-        # Forbid changing of resolvers for now
-        Expression.set_resolver(self, resolver)
-        self.target_variable.set_resolver(resolver)
-        self.expression.set_resolver(resolver)
-
-    def resolve(self):
+    def _resolve(self, resolver_stack):
         """
         Processes an expressions and resolves name bindings and creating new local vars 
         in the process if required.
@@ -50,23 +36,12 @@ class Assignment(Expression):
         # Resolve the target variable's binding.  This does'nt necessarily have
         # to evaluate types.
         # This will help us with type inference going backwards
-        if not self.is_temporary:
-            self.target_variable.resolve()
+        resolved_var = self.target_variable.resolve(resolver_stack)
 
         # Resolve all types in child expressions.  
         # Apart from just evaluating all child expressions, also make sure
         # Resolve field paths that should come from source type
-        self.expression.resolve()
-
-        if self.target_variable.is_temporary:
-            varname = str(self.target_variable.field_path)
-            if varname == "_":
-                self.target_variable = None
-            else:
-                # Resolve field paths that should come from dest type
-                self.target_variable.evaluated_typeexpr = self.expression.evaluated_typeexpr
-                self.parent_function.register_temp_var(varname, self.expression.evaluated_typeexpr)
-        self._evaluated_typeexpr = self.expression.evaluated_typeexpr
+        resolved_expr = self.expression.resolve(resolver_stack)
         return self
 
 class ExpressionList(Expression):
@@ -78,53 +53,28 @@ class ExpressionList(Expression):
     def add(self, expr):
         self.children.append(expr)
 
-    def set_resolver(self, resolver):
-        Expression.set_resolver(self, resolver)
-        for expr in self.children:
-            expr.set_resolver(resolver)
+    def _evaltype(self, resolver_stack):
+        resolved = self.resolve(resolver_stack)
+        return resolved.children[-1].evaltype(resolver_stack)
 
-    def resolve(self):
-        for expr in self.children: expr.resolve()
-        if self.children:
-            self._evaluated_typeexpr = self.children[-1].evaluated_typeexpr
-        else:
-            self._evaluated_typeexpr = tlcore.VoidType
+    def _resolve(self, resolver_stack):
+        resolved_exprs = [expr.resolve(resolver_stack) for expr in self.children]
+        if any(x != y for x,y in zip(self.children, resolved_exprs)):
+            return ExpressionList(resolved_exprs)
         return self
-
-class LiteralExpression(Expression):
-    """
-    An expression that contains a literal value like a number, string, boolean, array, or map.
-    """
-    def __init__(self, value, value_type = None):
-        super(LiteralExpression, self).__init__()
-        self._resolved_value = self.value = value
-        self.value_type = value_type
-        self._evaluated_typeexpr = self.value_type
-
-    def resolve(self): return self
-
-    def __repr__(self):
-        return "<Literal - ID: 0x%x, Value: %s>" % (id(self), str(self.value))
 
 class DictExpression(Expression):
     def __init__(self, values):
         super(DictExpression, self).__init__()
         self.values = values
 
-    def set_resolver(self, resolver):
-        Expression.set_resolver(resolver)
+    def _resolve(self, resolver_stack):
+        ipdb.set_trace()
         for key,value in self.values.iteritems():
-            key.set_resolver(resolver)
-            value.set_resolver(resolver)
-
-    def resolve(self):
-        for key,value in self.values.iteritems():
-            key.resolve()
-            value.resolve()
+            key.resolve(resolver_stack)
+            value.resolve(resolver_stack)
 
         # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
-        self._evaluated_typeexpr = tlcore.FunApp(MapType, [tlcore.AnyType, tlcore.AnyType], is_type_app = True)
-        self._evaluated_typeexpr.set_resolver(self.resolver)
         return self
 
 class ListExpression(Expression):
@@ -132,21 +82,18 @@ class ListExpression(Expression):
         super(ListExpression, self).__init__()
         self.values = values
 
-    def set_resolver(self, resolver):
-        Expression.set_resolver(self, resolver)
-        for value in self.values:
-            value.set_resolver(resolver)
+    def _evaltype(self, resolver_stack):
+        # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
+        return ArrayType.apply(tlcore.AnyType)
 
-    def resolve(self):
+    def _resolve(self, resolver_stack):
         """
         Processes an expressions and resolves name bindings and creating new local vars 
         in the process if required.
         """
-        for expr in self.values: expr.resolve()
-
-        # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
-        self._evaluated_typeexpr = tlcore.FunApp(ArrayType, tlcore.AnyType, is_type_app = True)
-        self._evaluated_typeexpr._resolver = self.resolver
+        resolved_exprs = [expr.resolve(resolver_stack) for expr in self.values]
+        if any(x != y for x,y in zip(self.values, resolved_exprs)):
+            return ListExpression(resolved_exprs)
         return self
 
 class TupleExpression(Expression):
@@ -154,21 +101,18 @@ class TupleExpression(Expression):
         super(TupleExpression, self).__init__()
         self.values = values or []
 
-    def set_resolver(self, resolver):
-        Expression.set_resolver(resolver)
-        for value in self.values:
-            value.set_resolver(resolver)
+    def _evaltype(self, resolver_stack):
+        # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
+        return ArrayType.apply(tlcore.AnyType)
 
-    def resolve(self):
+    def _resolve(self, resolver_stack):
         """
         Processes an expressions and resolves name bindings and creating new local vars 
         in the process if required.
         """
-        for expr in self.values: expr.resolve()
-
-        # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
-        self._evaluated_typeexpr = tlcore.FunApp(TupleType, tlcore.AnyType, is_type_app = True)
-        self._evaluated_typeexpr._resolver = self.resolver
+        resolved_exprs = [expr.resolve(resolver_stack) for expr in self.values]
+        if any(x != y for x,y in zip(self.values, resolved_exprs)):
+            return TupleExpression(resolved_exprs)
         return self
 
 class IfExpression(Expression):
@@ -178,23 +122,15 @@ class IfExpression(Expression):
         self.cases = cases or []
         self.default_expression = default_expression or []
 
-    def set_resolver(self, resolver):
-        Expression.set_resolver(self, resolver)
-        if self.default_expression:
-            self.default_expression.set_resolver(resolver)
-
-        for condition, stmt_block in self.cases:
-            condition.set_resolver(resolver)
-            stmt_block.set_resolver(resolver)
-
     def __repr__(self):
         return "<CondExp - ID: 0x%x>" % (id(self))
 
     def set_evaluated_typeexpr(self, vartype):
         assert False, "cannot set evaluated type of an If expression (yet)"
 
-    def resolve(self):
+    def _resolve(self, resolver_stack):
         """ Resolves bindings and types in all child expressions. """
+        ipdb.set_trace()
         assert self._evaluated_typeexpr == None, "Type has already been resolved, should not have been called twice."
 
         for condition, expr in self.cases:

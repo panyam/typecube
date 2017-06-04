@@ -7,25 +7,26 @@ from typelib.utils import FieldPath
 from typelib.annotations import Annotatable
 from typelib import unifier as tlunifier
 
+class ResolverStack(object):
+    def __init__(self, resolver, parent):
+        self.resolver = resolver
+        self.parent = parent
+
+    def resolve_name(self, name):
+        out = self.resolver.resolve_name(name)
+        if out is None:
+            return self.parent.resolve_name(name)
+        return out
+
+    def push(self, resolver):
+        return ResolverStack(resolver, self)
+
 class Expression(object):
     """
     Parent of all expressions.  All expressions must have a value.  Expressions only appear in functions.
     """
     def __init__(self):
-        self._evaluated_typeexpr = None
-        self._resolver = None
-        self._resolved_value = None
-
-    @property
-    def evaluated_typeexpr(self):
-        """ Every expressions must evaluate a type expression that will result in the expression's type. """
-        if not self._evaluated_typeexpr:
-            raise errors.TLException("Type checking failed for '%s'" % repr(self))
-        return self._evaluated_typeexpr
-
-    @evaluated_typeexpr.setter
-    def evaluated_typeexpr(self, typeexpr):
-        self.set_evaluated_typeexpr(typeexpr)
+        pass
 
     def substitute_with(self, bindings):
         """ This substitutes a given variable with the expression in the bindings map and returns a
@@ -35,60 +36,53 @@ class Expression(object):
 
     #########
 
-    @property
-    def resolver(self):
-        if not self._resolver:
-            ipdb.set_trace()
-        return self._resolver
+    def evaltype(self, resolver_stack):
+        # Do caching of results here based on resolver!
+        return self._evaltype(resolver_stack)
 
-    def set_resolver(self, resolver):
-        """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
-        how to bind/resolve names the expression itself refers.  This step recursively assigns
-        a resolver to every entity, expression that needs a resolver.  What the resolver should 
-        be and what it should do depends on the child.
-        """
-        if self._resolver and self._resolver != resolver and self._resolved_value is None:
-            ipdb.set_trace()
-            assert False, "Resolver has been set.  Cannot be set again."
-        self._resolver = resolver
-
-    @property
-    def resolved_value(self):
-        if self._resolved_value is None:
-            if self.resolver is None:
-                ipdb.set_trace()
-            assert self.resolver is not None
-            self._resolved_value = self.resolve()
-            self.on_resolution_finished()
-        return self._resolved_value
-
-    def on_resolution_finished(self): pass
-
-    def resolve(self):
-        """ This method resolves a type expression to a type object. """
+    def _evaltype(self, resolver_stack):
         ipdb.set_trace()
+        assert False, "not implemented"
+        return None
+
+    def resolve(self, resolver):
+        # Do caching of results here based on resolver!
+        return self._resolve(resolver)
+
+    def _resolve(self, resolver_stack):
+        """ This method resolves a type expression to a type object. 
+        The resolver is used to get bindings for names used in this expression.
+        
+        Returns a ResolvedValue object that contains the final expression value after resolution of this expression.
+        """
         assert False, "Not Implemented"
         return self
 
-    def resolve_type_name(self, name):
-        return self.resolver.resolve_type_name(name)
+class Literal(Expression):
+    """
+    An expression that contains a literal value like a number, string, boolean, array, or map.
+    """
+    def __init__(self, value, value_type):
+        Expression.__init__(self)
+        self.value = value
+        self.value_type = value_type
 
-    def resolve_name(self, name):
-        return None if not self.resolver else self.resolver.resolve_name(name)
+    def _evaltype(self, resolver_stack):
+        return self.value_type
+
+    def resolve(self, resolver):
+        return self
+
+    def __repr__(self):
+        return "<Literal(0x%x), Value: %s>" % (id(self), str(self.value))
 
 class Variable(Expression):
     """ An occurence of a name that can be bound to a value, a field or a type. """
     def __init__(self, field_path):
         super(Variable, self).__init__()
-        # Whether we are a temporary local var
-        self.is_temporary = False
-        # Whether a resolved value is a function
-        self.is_type = False
-        self.is_function = False
         if type(field_path) in (str, unicode):
             field_path = FieldPath(field_path)
         self.field_path = field_path
-        self.root_value = None
         assert type(field_path) is FieldPath and field_path.length > 0
 
     def __repr__(self):
@@ -107,63 +101,29 @@ class Variable(Expression):
         if self.field_path.length != 1: return self
         return bindings[first]
 
-    def set_evaluated_typeexpr(self, typeexpr):
-        if self.is_temporary:
-            self._evaluated_typeexpr = typeexpr
-        else:
-            assert False, "cannot set evaluted type of a non local var: %s" % self.field_path
+    def _evaltype(self, resolver_stack):
+        resolved = self.resolve(resolver_stack)
+        if type(resolved) is Type:
+            return resolved
+        if type(resolved) is Fun:
+            return resolved.func_type.resolve(resolver_stack)
+        if type(resolved) is FunApp:
+            func = resolved.func_expr.resolve(resolver_stack)
+            func_type = func.func_type.resolve(resolver_stack)
+            return func_type.output_arg
+        if type(resolved) is Literal:
+            return resolved.evaltype(resolver_stack)
+        assert False, "Unknown resolved value type"
 
-    def resolve(self):
+    def _resolve(self, resolver_stack):
         """
-        Processes an expressions and resolves name bindings and creating new local vars 
-        in the process if required.
+        Returns the actual entry pointed to by the "first" part of the field path.
         """
-        first, field_path_tail = self.field_path.pop()
-        self.is_temporary = self.is_temporary or first == "_"
-        if first == "_":
-            self.is_temporary = True
-            self._evaluated_typeexpr = VoidType
-        else:
-            # See which of the params we should bind to
-            target = self.resolver.resolve_name(first)
-            if target is None:
-                ipdb.set_trace()
-                assert target is not None, "Could not result '%s'" % first
-
-            if type(target) is TypeArg:
-                if type(target) is not TypeArg:
-                    ipdb.set_trace()
-                    assert False
-                var_typearg = target
-                self.root_value = var_typearg
-                self._evaluated_typeexpr = var_typearg.type_expr
-                if field_path_tail.length > 0:
-                    curr_typearg = var_typearg
-                    for i in xrange(field_path_tail.length):
-                        part = field_path_tail.get(i)
-                        next_typearg = curr_typearg.type_expr.resolved_value.args.withname(part)
-                        curr_typearg = next_typearg
-                    resolved_value = curr_typearg
-                    self._evaluated_typeexpr = resolved_value.type_expr
-            elif type(target) is Type:
-                self.is_type = True
-                self.root_value = target
-                self._evaluated_typeexpr = target
-            elif type(target) is Fun:
-                # Check if this is actually referring to a function and not a member
-                if self.field_path.length != 1:
-                    ipdb.set_trace()
-                assert self.field_path.length == 1
-                fname = self.field_path.get(0)
-                self.is_function = True
-                self.root_value = resolved_value = self.resolver.resolve_name(fname)
-                if type(resolved_value) is not Fun:
-                    ipdb.set_trace()
-                self._evaluated_typeexpr = resolved_value.func_type
-            else:
-                ipdb.set_trace()
-                assert False
-        return self.root_value
+        first = self.field_path.get(0)
+        target = resolver_stack.resolve_name(first)
+        if target is None:
+            assert target is not None, "Could not resolve '%s'" % first
+        return target
 
 class Fun(Expression, Annotatable):
     """
@@ -180,19 +140,65 @@ class Fun(Expression, Annotatable):
         self.name = name
         self.func_type = func_type
         self.expression = None
-        self.is_external = False
         self.temp_variables = {}
+
+    @property
+    def is_external(self): return self.expression is None
+
+    def _resolve(self, resolver_stack):
+        """
+        The main resolver method.  This should take care of the following:
+
+            1. Ensure field paths are correct
+            2. All expressions have their evaluated types set
+        """
+        if resolver_stack == None:
+            resolver_stack = ResolverStack(self.parent, None)
+        resolver_stack = resolver_stack.push(self)
+        func_type = self.func_type.resolve(resolver_stack)
+        resolved_expr = None if not self.expression else self.expression.resolve(resolver_stack)
+        if func_type == self.func_type and resolved_expr == self.expression:
+            return self
+        out = Fun(self.name, func_type, self.parent, self.annotations, self.docs)
+        out.expression = resolved_expr
+        return out
+
+    def _evaltype(self, resolver_stack):
+        return self.resolve(resolver_stack).func_type
+
+    def resolve_name(self, name):
+        """ Try to resolve a name to a local, source or destination variable. """
+        function = self
+        # Check source types
+        out_typearg = None
+        for typearg in function.func_type.args:
+            if typearg.name == name:
+                out_typearg = typearg
+                break
+        else:
+            if function.func_type.output_arg and function.func_type.output_arg.name == name:
+                out_typearg = function.func_type.output_arg
+            elif function.is_temp_variable(name):
+                # Check local variables
+                out_typearg = TypeArg(name, function.temp_var_type(name))
+
+        if out_typearg:
+            if out_typearg.type_expr == KindType:
+                ipdb.set_trace()
+                return None
+        return out_typearg
 
     def apply(self, args):
         """ Apply this function's expression to a bunch of arguments and return a resultant expression. """
         assert len(args) <= len(self.source_typeargs), "Too many arguments provided."
 
-        argnames = (arg.name for arg in self.source_typeargs)
+        argnames = [arg.name for arg in self.source_typeargs]
         bindings = dict(zip(argnames, args))
         if len(args) < len(self.source_typeargs):
             # Create a curried function since we have less arguments
             assert False, "Currying not yet implemented"
             ipdb.set_trace()
+
             new_func_type = self.func_type
             out = Fun(self.name, new_func_type, self.parent, self.annotations, self.docs)
             out.expression = FunApp(self, args + [Variable(arg.name) for arg in new_func_type.source_typeargs])
@@ -226,57 +232,27 @@ class Fun(Expression, Annotatable):
     @property
     def is_type_fun(self): return self._is_type_fun
 
-    def set_resolver(self, resolver):
-        """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
-        how to bind/resolve names the expression itself refers.  This step recursively assigns
-        a resolver to every entity, expression that needs a resolver.  What the resolver should 
-        be and what it should do depends on the child.
-        """
-        Expression.set_resolver(self, resolver)
-        self.func_type.set_resolver(self)
-        if self.expression:
-            self.expression.set_resolver(self)
-
     @property
     def fqn(self):
         out = self.name
         if self.parent and self.parent.fqn:
-            if out is None:
-                ipdb.set_trace()
             out = self.parent.fqn + "." + out
         return out or ""
 
     def __repr__(self):
         return "<%s(0x%x) %s>" % (self.__class__.__name__, id(self), self.name)
 
-    def resolve_name(self, name):
-        """ Try to resolve a name to a local, source or destination variable. """
-        # Check source types
-        for typearg in self.func_type.args:
-            if typearg.name == name:
-                return typearg
-
-        # Check local variables
-        if self.is_temp_variable(name):
-            return TypeArg(name, self.temp_var_type(name))
-        return self.resolver.resolve_name(name)
-
     @property
     def source_typeargs(self):
-        return self.func_type.args[:-1]
+        return self.func_type.args
 
     @property
     def dest_typearg(self):
-        return self.func_type.args[-1]
+        return self.func_type.output_arg
 
     @property
     def returns_void(self):
-        return self.func_type.args[-1] == VoidType
-
-    @property
-    def returns_void(self):
-        dest_typearg = self.func_type.args[-1]
-        return dest_typearg is None or dest_typearg.type_expr.resolved_value == VoidType
+        return self.func_type.output_arg == VoidType
 
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
@@ -302,29 +278,8 @@ class Fun(Expression, Annotatable):
             raise TLException("Duplicate temporary variable declared: '%s'" % varname)
         self.temp_variables[varname] = vartype
 
-    def resolve(self):
-        """
-        The main resolver method.  This should take care of the following:
-
-            1. Ensure field paths are correct
-            2. All expressions have their evaluated types set
-        """
-        # Now resolve all field paths appropriately
-        self.expression.resolve()
-        return self
-
 class FunApp(Expression):
-    """
-    An expression for denoting a function call.  Fun calls can only be at the start of a expression stream, eg;
-
-    f(x,y,z) => H => I => J
-
-    but the following is invalid:
-
-    H => f(x,y,z) -> J
-
-    because f(x,y,z) must return an observable and observable returns are not supported (yet).
-    """
+    """ An expression for denoting a function application.  """
     def __init__(self, func_expr, func_args = None, is_type_app = False):
         super(FunApp, self).__init__()
         self._is_type_app = is_type_app 
@@ -345,18 +300,15 @@ class FunApp(Expression):
     @property
     def is_type_app(self): return self._is_type_app
 
-    def set_resolver(self, resolver):
-        """ Before we can do any bindings.  Each expression (and entity) needs resolvers to know 
-        how to bind/resolve names the expression itself refers.  This step recursively assigns
-        a resolver to every entity, expression that needs a resolver.  What the resolver should 
-        be and what it should do depends on the child.
-        """
-        Expression.set_resolver(self, resolver)
-        self.func_expr.set_resolver(resolver)
-        for arg in self.func_args:
-            arg.set_resolver(resolver)
+    def _evaltype(self, resolver_stack):
+        resolved = self.resolve(resolver_stack)
+        if type(resolved) is FunApp:
+            resolved.func_expr.evaltype(resolver_stack)
+        else:
+            ipdb.set_trace()
+            return self.resolve(resolver_stack).func_type
 
-    def resolve(self):
+    def _resolve(self, resolver):
         """
         Processes an expressions and resolves name bindings and creating new local vars 
         in the process if required.
@@ -364,50 +316,31 @@ class FunApp(Expression):
         # First resolve the expression to get the source function
         # Here we need to decide if the function needs to be "duplicated" for each different type
         # This is where type re-ification is important - both at buildtime and runtime
-        self.func_expr.resolve()
-        if not self.func_expr.resolved_value:
+        function = self.func_expr.resolve(resolver)
+        if not function:
             raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
-        if type(self.func_expr.resolved_value) is not Fun:
+        if type(function) is not Fun:
             raise errors.TLException("Fun '%s' is not a function" % (self.func_expr))
 
-        # Each of the function arguments is either a variable or a value.  
-        # If it is a variable expression then it needs to be resolved starting from the
-        # function that holds this statement (along with any other locals and upvals)
-        for arg in self.func_args:
-            arg.resolve()
-
-        function = self.func_expr.resolved_value
-        if len(self.func_args) != len(function.source_typeargs):
-            raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d" %
-                                            (str(func_type), len(function.source_typeargs), len(self.func_args)))
-
         if function.is_type_fun:
-            if not self.is_type_app:
-                ipdb.set_trace()
             assert self.is_type_app
-            ipdb.set_trace()
-            out = function.apply(self.func_args)
-            out.set_resolver(self.resolver)
-            return out
-        else:
-            for i,arg in enumerate(self.func_args):
-                peg_type = arg.evaluated_typeexpr.resolved_value
-                hole_type = function.source_typeargs[i].type_expr.resolved_value
-                if not tlunifier.can_substitute(peg_type, hole_type):
-                    ipdb.set_trace()
-                    raise errors.TLException("Argument at index %d expected (hole) type (%s), found (peg) type (%s)" % (i, hole_type, peg_type))
-            self._evaluated_typeexpr = function.dest_typearg.type_expr
-            if function.is_type_fun:
-                assert self.is_type_app
+            if str(self.func_expr.field_path).endswith("StripeValueResponse"):
                 ipdb.set_trace()
-                # TODO: reify this type?
-            return self
+            arg_values = [arg.resolve(resolver) for arg in self.func_args]
+            return function.apply(arg_values)
+        else:
+            arg_values = [arg.resolve(resolver) for arg in self.func_args]
+            # Wont do currying for now
+            if len(arg_values) != len(function.source_typeargs):
+                raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying NOT YET supported." %
+                                                (str(func_type), len(function.source_typeargs), len(self.func_args)))
 
-    @property
-    def evaluated_typeexpr(self):
-        if self._evaluated_typeexpr is None:
-            self._evaluated_typeexpr = self.func_expr.root_value.dest_typearg.typeexpr
-        return self._evaluated_typeexpr
+            # TODO - check arg types match
+
+            # Only return a new expression if any thing has changed
+            if function != self.func_expr or any(x != y for x,y in zip(arg_values, self.func_args)):
+                return FunApp(function, arg_values)
+        return self
 
 def TypeFun(name, type_params, expression, parent, annotations = None, docs = ""):
     func_type = make_func_type(name, [TypeArg(tp,KindType) for tp in type_params], KindType)
@@ -417,7 +350,7 @@ def TypeFun(name, type_params, expression, parent, annotations = None, docs = ""
     return out
 
 class Type(Expression, Annotatable):
-    def __init__(self, constructor, name, type_args, parent, annotations = None, docs = ""):
+    def __init__(self, constructor, name, type_args, output_arg, parent, annotations = None, docs = ""):
         """
         Creates a new type function.  Type functions are responsible for creating concrete type instances
         or other (curried) type functions.
@@ -428,6 +361,7 @@ class Type(Expression, Annotatable):
             name            Name of the type.
             type_args       Type arguments are fields/children of a given type are themselves expressions 
                             (whose final type must be of Type).
+            output_arg      Type arguments of the output if this is a Function type
             parent          A reference to the parent container entity of this type.
             annotations     Annotations applied to the type.
             docs            Documentation string for the type.
@@ -438,29 +372,30 @@ class Type(Expression, Annotatable):
         if type(constructor) not in (str, unicode):
             raise errors.TLException("constructor must be a string")
 
-        self._resolved_value = self
         self.constructor = constructor
         self.parent = parent
         self.name = name
         self.args = TypeArgList(type_args)
+        self.output_arg = output_arg if output_arg is None else validate_typearg(output_arg)
         self._signature = None
+
+    def _evaltype(self, resolver_stack):
+        """ Type of a "Type" is a KindType!!! """
+        return KindType
 
     def substitute_with(self, bindings):
         new_args = [arg.substitute_with(bindings) for arg in self.args]
-        return Type(self.constructor, self.name, new_args, self.parent, self.annotations, self.docs)
+        new_output_arg = None
+        if self.output_arg:
+            new_output_arg = self.output_arg.substitute_with(bindings)
+        return Type(self.constructor, self.name, new_args, new_output_arg, self.parent, self.annotations, self.docs)
 
-    def set_resolver(self, resolver):
-        """ Resolver for children with this function.  This will give them a chance
-        to resolve to parameters before globals are searched.
-        """
-        Expression.set_resolver(self, resolver)
-        for arg in self.args:
-            arg.type_expr.set_resolver(self)
-
-    def resolve(self):
+    def _resolve(self, resolver_stack):
         # A Type resolves to itself
-        for index,arg in enumerate(self.args):
-            arg.type_expr.resolved_value
+        new_type_args = [arg.resolve(resolver_stack) for arg in self.args]
+        new_output_arg = None if not self.output_arg else self.output_arg.resolve(resolver_stack)
+        if new_output_arg != self.output_arg or any(x == y for x,y in zip(new_type_args, self.args)):
+            return Type(self.constructor, self.name, new_type_args, new_output_arg, self.parent, self.annotations, self.docs)
         return self
 
     def signature(self, visited = None):
@@ -484,9 +419,10 @@ class Type(Expression, Annotatable):
             out["args"] = [arg.json(**kwargs) for arg in self.args]
         return out
 
-class TypeArg(Annotatable):
+class TypeArg(Expression, Annotatable):
     """ A type argument is a child of a given type.  Akin to a member/field of a type.  """
     def __init__(self, name, type_expr, is_optional = False, default_value = None, annotations = None, docs = ""):
+        Expression.__init__(self)
         Annotatable.__init__(self, annotations, docs)
         self.name = name
         self.type_expr = type_expr
@@ -499,9 +435,47 @@ class TypeArg(Annotatable):
             out["name"] = self.name
         return out
 
+    def _evaltype(self, resolver_stack):
+        """ Type of a "Type" is a KindType!!! """
+        resolved = self.resolve(resolver_stack)
+        return resolved.type_expr.resolve(resolver_stack)
+
+    def _resolve(self, resolver_stack):
+        out = self
+        if self.type_expr is None:
+            return self
+        new_expr = self.type_expr.resolve(resolver_stack)
+        if new_expr != self.type_expr:
+            out =  TypeArg(self.name, new_expr, self.is_optional, self.docs, annotations = self.annotations, docs = self.docs)
+        return out
+
     def substitute_with(self, bindings):
         new_expr = self.type_expr.substitute_with(bindings)
         return TypeArg(self.name, new_expr, self.is_optional, self.default_value, self.annotations, self.docs)
+
+    def unwrap_with_field_path(self, full_field_path, resolver_stack):
+        starting_var, field_path = full_field_path.pop()
+        curr_typearg = self
+        curr_path = curr_field_name = starting_var
+        yield curr_field_name, curr_path, curr_typearg
+        while field_path.length > 0:
+            next_field_name, tail_path = field_path.pop()
+            next_path = curr_path + "/" + next_field_name
+            if curr_typearg is None:
+                ipdb.set_trace()
+            next_typearg = curr_typearg.type_expr.resolve(resolver_stack).args.withname(next_field_name)
+            curr_field_name, curr_path, field_path = next_field_name, next_path, tail_path
+            yield curr_field_name, curr_path, curr_typearg
+
+def validate_typearg(arg):
+    if isinstance(arg, TypeArg):
+        return arg
+    elif issubclass(arg.__class__, Expression):
+        return TypeArg(None, arg)
+    elif type(arg) in (str, unicode):
+        return TypeArg(None, Variable(arg))
+    else:
+        raise errors.TLException("Argument must be a TypeArg, Expression or a string. Found: '%s'" % type(arg))
 
 class TypeArgList(object):
     """ A list of type args for a particular type container. """
@@ -516,6 +490,9 @@ class TypeArgList(object):
     def __iter__(self): return iter(self._type_args)
 
     def __len__(self): return len(self._type_args)
+
+    def __repr__(self):
+        return repr(self._type_args)
 
     @property
     def count(self): return len(self._type_args)
@@ -539,36 +516,31 @@ class TypeArgList(object):
         """
         Add an argument type.
         """
-        if type(arg) in (str, unicode):
-            arg = Variable(arg)
-        if issubclass(arg.__class__, Expression):
-            arg = TypeArg(None, arg)
-        elif not isinstance(arg, TypeArg):
-            raise errors.TLException("Argument must be a TypeArg. Found: '%s'" % type(arg))
-
+        arg = validate_typearg(arg)
         if arg.name:
             index = self.index_for(arg.name)
             if index >= 0:
                 raise errors.TLException("Child type by the given name '%s' already exists" % arg.name)
         self._type_args.append(arg)
 
-def make_type(constructor, name, type_args, parent = None, annotations = None, docs = ""):
-    return Type(constructor, name, type_args = type_args,
+def make_type(constructor, name, type_args, output_arg, parent = None, annotations = None, docs = ""):
+    return Type(constructor, name, type_args = type_args, output_arg = output_arg,
                  parent = parent, annotations = annotations, docs = docs)
 
 def make_literal_type(name, parent = None, annotations = None, docs = ""):
-    return make_type("literal", name, type_args = None, parent = parent, annotations = annotations, docs = docs)
+    return make_type("literal", name, type_args = None, output_arg = None,
+                     parent = parent, annotations = annotations, docs = docs)
 
 def make_func_type(name, type_args, output_arg, parent = None, annotations = None, docs = ""):
-    return make_type("function", name, type_args + [output_arg],
+    return make_type("function", name, type_args, output_arg,
                      parent = parent, annotations = annotations, docs = docs)
 
 def make_typeref(name, type_expr, parent = None, annotations = None, docs = ""):
-    return make_type("typeref", name, type_args = [type_expr],
+    return make_type("typeref", name, type_args = [type_expr], output_arg = None,
                      parent = parent, annotations = annotations, docs = docs)
 
 def make_extern_type(name, type_args, parent = None, annotations = None, docs = ""):
-    return make_type("extern", name, type_args = type_args,
+    return make_type("extern", name, type_args = type_args, output_arg = None,
                      parent = parent, annotations = annotations, docs = docs)
 
 KindType = make_literal_type("Type")
