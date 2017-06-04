@@ -7,7 +7,17 @@ from typelib.utils import FieldPath
 from typelib.annotations import Annotatable
 from typelib import unifier as tlunifier
 
-class ResolverStack(object):
+class Resolver(object):
+    def resolve_name(self, name): return None
+
+class MapResolver(Resolver):
+    def __init__(self, bindings):
+        self.bindings = bindings
+
+    def resolve_name(self, name):
+        return self.bindings.get(name, None)
+
+class ResolverStack(Resolver):
     def __init__(self, resolver, parent):
         self.resolver = resolver
         self.parent = parent
@@ -15,7 +25,10 @@ class ResolverStack(object):
     def resolve_name(self, name):
         out = self.resolver.resolve_name(name)
         if out is None:
-            return self.parent.resolve_name(name)
+            if self.parent:
+                return self.parent.resolve_name(name)
+            else:
+                raise errors.TLException("Unable to resolve name: %s" % name)
         return out
 
     def push(self, resolver):
@@ -154,6 +167,7 @@ class Fun(Expression, Annotatable):
 
         argnames = [arg.name for arg in self.source_typeargs]
         bindings = dict(zip(argnames, args))
+
         if len(args) < len(self.source_typeargs):
             # Create a curried function since we have less arguments
             assert False, "Currying not yet implemented"
@@ -166,10 +180,12 @@ class Fun(Expression, Annotatable):
         else:
             if self.is_external:
                 # Nothing we can do so just return ourself
+                ipdb.set_trace()
                 return self
             else:
                 # Create a curried function
-                out = self.expression.substitute_with(bindings)
+                resolver_stack = resolver_stack.push(MapResolver(bindings))
+                out = self.expression.resolve(resolver_stack)
                 return out
 
     def _resolve(self, resolver_stack):
@@ -215,7 +231,7 @@ class Fun(Expression, Annotatable):
 
     @property
     def returns_void(self):
-        return self.func_type.output_arg == VoidType
+        return self.func_type.output_arg and self.func_type.output_arg.type_expr == VoidType
 
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
@@ -265,7 +281,7 @@ class FunApp(Expression):
             ipdb.set_trace()
             return self.resolve(resolver_stack).func_type
 
-    def _resolve(self, resolver):
+    def _resolve(self, resolver_stack):
         """
         Processes an expressions and resolves name bindings and creating new local vars 
         in the process if required.
@@ -273,7 +289,7 @@ class FunApp(Expression):
         # First resolve the expression to get the source function
         # Here we need to decide if the function needs to be "duplicated" for each different type
         # This is where type re-ification is important - both at buildtime and runtime
-        function = self.func_expr.resolve(resolver)
+        function = self.func_expr.resolve(resolver_stack)
         if not function:
             raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
         if type(function) is not Fun:
@@ -281,12 +297,10 @@ class FunApp(Expression):
 
         if function.is_type_fun:
             assert self.is_type_app
-            arg_values = [arg.resolve(resolver) for arg in self.func_args]
-            if str(self.func_expr.field_path).endswith("StripeValueResponse"):
-                ipdb.set_trace()
-            return function.apply(arg_values)
+            arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
+            return function.apply(arg_values, resolver_stack)
         else:
-            arg_values = [arg.resolve(resolver) for arg in self.func_args]
+            arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
             # Wont do currying for now
             if len(arg_values) != len(function.source_typeargs):
                 raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying NOT YET supported." %
@@ -334,6 +348,13 @@ class Type(Expression, Annotatable):
         self.output_arg = output_arg if output_arg is None else validate_typearg(output_arg)
         self._signature = None
 
+    @property
+    def fqn(self):
+        out = self.name
+        if self.parent and self.parent.fqn:
+            out = self.parent.fqn + "." + out
+        return out or ""
+
     def _evaltype(self, resolver_stack):
         """ Type of a "Type" is a KindType!!! """
         return KindType
@@ -342,7 +363,7 @@ class Type(Expression, Annotatable):
         # A Type resolves to itself
         new_type_args = [arg.resolve(resolver_stack) for arg in self.args]
         new_output_arg = None if not self.output_arg else self.output_arg.resolve(resolver_stack)
-        if new_output_arg != self.output_arg or any(x == y for x,y in zip(new_type_args, self.args)):
+        if new_output_arg != self.output_arg or any(x != y for x,y in zip(new_type_args, self.args)):
             return Type(self.constructor, self.name, new_type_args, new_output_arg, self.parent, self.annotations, self.docs)
         return self
 
