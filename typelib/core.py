@@ -303,8 +303,8 @@ class FunApp(Expression):
             arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
             # Wont do currying for now
             if len(arg_values) != len(function.source_typeargs):
-                raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying NOT YET supported." %
-                                                (str(func_type), len(function.source_typeargs), len(self.func_args)))
+                raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
+                                                (function.name, len(function.source_typeargs), len(self.func_args)))
 
             # TODO - check arg types match
 
