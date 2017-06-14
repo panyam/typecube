@@ -135,6 +135,23 @@ class Fun(Expression, Annotatable):
         self.func_type = func_type
         self.expression = expression
         self.temp_variables = {}
+        self._default_resolver_stack = None
+
+    @property
+    def default_resolver_stack(self):
+        if self._default_resolver_stack is None:
+            self._default_resolver_stack = ResolverStack(self.parent, None).push(self)
+        return self._default_resolver_stack
+
+    def __json__(self, **kwargs):
+        out = {}
+        if self.name:
+            out["name"] = self.name
+        if kwargs.get("include_docs", False) and self.docs:
+            out["docs"] = self.docs
+        if self.func_type:
+            out["type"] = self.func_type.json(**kwargs)
+        return out
 
     @property
     def is_external(self): return self.expression is None
@@ -277,9 +294,11 @@ class FunApp(Expression):
         resolved = self.resolve(resolver_stack)
         if type(resolved) is FunApp:
             resolved.func_expr.evaltype(resolver_stack)
+        elif isinstance(resolved, Type):
+            return resolved
         else:
             ipdb.set_trace()
-            return self.resolve(resolver_stack).func_type
+            assert False, "What now?"
 
     def _resolve(self, resolver_stack):
         """
@@ -370,10 +389,22 @@ class Type(Expression, Annotatable):
     def signature(self, visited = None):
         if not self._signature:
             if visited is None: visited = set()
-            self._signature = self.constructor
-            if self.name: self._signature += ":" + self.name
+            if self.name:
+                self._signature = self.name
+            else:
+                assert self.constructor is not None
+                self._signature = self.constructor
             if self.args:
-                self._signature += "(" + ", ".join([t.type_expr.signature(visited) for t in self.args]) + ")"
+                argsigs = []
+                for arg in self.args:
+                    if isinstance(arg.type_expr, Variable):
+                        argsigs.append(str(arg.type_expr.field_path))
+                    elif isinstance(arg.type_expr, FunApp):
+                        assert arg.type_expr.is_type_app
+                        ipdb.set_trace()
+                    else:
+                        argsigs.append(arg.type_expr.signature(visited))
+                self._signature += "<" + ", ".join(argsigs) + ">"
         return self._signature
 
     def __json__(self, **kwargs):
@@ -402,6 +433,9 @@ class TypeArg(Expression, Annotatable):
         out = {}
         if self.name:
             out["name"] = self.name
+        if "resolver" in kwargs:
+            exprtype = self.type_expr.evaltype(kwargs["resolver"])
+            out["type"] = exprtype.signature()
         return out
 
     def _evaltype(self, resolver_stack):
