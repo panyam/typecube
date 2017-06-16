@@ -1,4 +1,32 @@
 import ipdb
+import core as tlcore
+
+def signature_for_type(thetype, resolver, visited = None):
+    if visited is None: visited = set()
+    if thetype.name:
+        signature = thetype.name
+    else:
+        assert thetype.constructor is not None
+        signature = thetype.constructor
+    if thetype.args:
+        argsigs = []
+        for arg in thetype.args:
+            if isinstance(arg.type_expr, Variable):
+                argsigs.append(str(arg.type_expr.field_path))
+            elif isinstance(arg.type_expr, FunApp):
+                assert arg.type_expr.is_type_app
+                ipdb.set_trace()
+            else:
+                argsigs.append(signature_for_typeexpr(arg.type_expr, resolver, visited))
+        signature += "<" + ", ".join(argsigs) + ">"
+    return signature
+
+def signature_for_typeexpr(type_expr, resolver, visited = None, signature_for_type = signature_for_type):
+    if visited is None: visited = set()
+    exprtype = type_expr
+    if not isinstance(type_expr, tlcore.Type):
+        exprtype = type_expr.evaltype(resolver)
+    return signature_for_type(exprtype, resolver, visited = visited)
 
 def ensure_types(**conditions):
     """ A decorator when applied to a function performs type checking on the arguments passed to it. """

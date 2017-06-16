@@ -15,7 +15,7 @@ FloatType = tlcore.make_literal_type("float")
 DoubleType = tlcore.make_literal_type("double")
 StringType = tlcore.make_literal_type("string")
 MapType = tlcore.TypeFun("map", ["K", "V"], tlcore.make_extern_type("map", ["K", "V"]), None)
-ArrayType = tlcore.TypeFun("array", ["V"], tlcore.make_extern_type("array", ["V"]), None)
+ListType = tlcore.TypeFun("list", ["V"], tlcore.make_extern_type("list", ["V"]), None)
 
 class Assignment(Expression):
     def __init__(self, parent_function, target_variable, expression):
@@ -84,7 +84,7 @@ class ListExpression(Expression):
 
     def _evaltype(self, resolver_stack):
         # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
-        return ArrayType.apply(tlcore.AnyType)
+        return ListType.apply(tlcore.AnyType)
 
     def _resolve(self, resolver_stack):
         """
@@ -103,7 +103,7 @@ class TupleExpression(Expression):
 
     def _evaltype(self, resolver_stack):
         # TODO - Unify the types of child expressions and find the tightest type here Damn It!!!
-        return ArrayType.apply(tlcore.AnyType)
+        return ListType.apply(tlcore.AnyType)
 
     def _resolve(self, resolver_stack):
         """

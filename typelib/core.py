@@ -67,7 +67,7 @@ class Expression(object):
 
 class Literal(Expression):
     """
-    An expression that contains a literal value like a number, string, boolean, array, or map.
+    An expression that contains a literal value like a number, string, boolean, list, or map.
     """
     def __init__(self, value, value_type):
         Expression.__init__(self)
@@ -107,6 +107,7 @@ class Variable(Expression):
             return func_type.output_arg
         if type(resolved) is Literal:
             return resolved.evaltype(resolver_stack)
+        ipdb.set_trace()
         assert False, "Unknown resolved value type"
 
     def _resolve(self, resolver_stack):
@@ -365,7 +366,6 @@ class Type(Expression, Annotatable):
         self.name = name
         self.args = TypeArgList(type_args)
         self.output_arg = output_arg if output_arg is None else validate_typearg(output_arg)
-        self._signature = None
 
     @property
     def fqn(self):
@@ -385,27 +385,6 @@ class Type(Expression, Annotatable):
         if new_output_arg != self.output_arg or any(x != y for x,y in zip(new_type_args, self.args)):
             return Type(self.constructor, self.name, new_type_args, new_output_arg, self.parent, self.annotations, self.docs)
         return self
-
-    def signature(self, visited = None):
-        if not self._signature:
-            if visited is None: visited = set()
-            if self.name:
-                self._signature = self.name
-            else:
-                assert self.constructor is not None
-                self._signature = self.constructor
-            if self.args:
-                argsigs = []
-                for arg in self.args:
-                    if isinstance(arg.type_expr, Variable):
-                        argsigs.append(str(arg.type_expr.field_path))
-                    elif isinstance(arg.type_expr, FunApp):
-                        assert arg.type_expr.is_type_app
-                        ipdb.set_trace()
-                    else:
-                        argsigs.append(arg.type_expr.signature(visited))
-                self._signature += "<" + ", ".join(argsigs) + ">"
-        return self._signature
 
     def __json__(self, **kwargs):
         out = {}
@@ -433,9 +412,6 @@ class TypeArg(Expression, Annotatable):
         out = {}
         if self.name:
             out["name"] = self.name
-        if "resolver" in kwargs:
-            exprtype = self.type_expr.evaltype(kwargs["resolver"])
-            out["type"] = exprtype.signature()
         return out
 
     def _evaltype(self, resolver_stack):
