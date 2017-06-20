@@ -8,28 +8,31 @@ from typelib.annotations import Annotatable
 from typelib import unifier as tlunifier
 
 class Resolver(object):
-    def resolve_name(self, name): return None
+    def resolve_name(self, name, condition = None): return None
 
 class MapResolver(Resolver):
     def __init__(self, bindings):
         self.bindings = bindings
 
-    def resolve_name(self, name):
-        return self.bindings.get(name, None)
+    def resolve_name(self, name, condition = None):
+        out = self.bindings.get(name, None)
+        if condition is None or condition(out):
+            return out
+        return None
 
 class ResolverStack(Resolver):
     def __init__(self, resolver, parent):
         self.resolver = resolver
         self.parent = parent
 
-    def resolve_name(self, name):
+    def resolve_name(self, name, condition = None):
         out = self.resolver.resolve_name(name)
-        if out is None:
-            if self.parent:
-                return self.parent.resolve_name(name)
-            else:
-                raise errors.TLException("Unable to resolve name: %s" % name)
-        return out
+        if out is not None and (condition is None or condition(out)):
+            return out
+        elif self.parent:
+            return self.parent.resolve_name(name)
+        else:
+            raise errors.TLException("Unable to resolve name: %s" % name)
 
     def push(self, resolver):
         return ResolverStack(resolver, self)
@@ -312,6 +315,10 @@ class FunApp(Expression):
         function = self.func_expr.resolve(resolver_stack)
         if not function:
             raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
+        while type(function) is Type and function.constructor == "typeref":
+            assert len(function.args) == 1, "Typeref cannot have more than one child argument"
+            function = function.args[0].type_expr.resolve(function.default_resolver_stack)
+
         if type(function) is not Fun:
             raise errors.TLException("Fun '%s' is not a function" % (self.func_expr))
 
@@ -366,6 +373,13 @@ class Type(Expression, Annotatable):
         self.name = name
         self.args = TypeArgList(type_args)
         self.output_arg = output_arg if output_arg is None else validate_typearg(output_arg)
+        self._default_resolver_stack = None
+
+    @property
+    def default_resolver_stack(self):
+        if self._default_resolver_stack is None:
+            self._default_resolver_stack = ResolverStack(self.parent, None)
+        return self._default_resolver_stack
 
     @property
     def fqn(self):
