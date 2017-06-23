@@ -1,5 +1,4 @@
 import ipdb
-import core as tlcore
 
 def signature_for_type(thetype, resolver, visited = None):
     if visited is None: visited = set()
@@ -24,6 +23,7 @@ def signature_for_type(thetype, resolver, visited = None):
 def signature_for_typeexpr(type_expr, resolver, visited = None, signature_for_type = signature_for_type):
     if visited is None: visited = set()
     exprtype = type_expr
+    import core as tlcore
     if not isinstance(type_expr, tlcore.Type):
         exprtype = type_expr.evaltype(resolver)
     return signature_for_type(exprtype, resolver, visited = visited)
