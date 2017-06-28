@@ -104,7 +104,7 @@ class Variable(Expression):
             return resolved
         if type(resolved) is Fun:
             return resolved.func_type.resolve(resolver_stack)
-        if type(resolved) is FunApp:
+        if issubclass(resolved.__class__, App):
             func = resolved.func_expr.resolve(resolver_stack)
             func_type = func.func_type.resolve(resolver_stack)
             return func_type.output_arg
@@ -278,25 +278,21 @@ class Fun(Expression, Annotatable):
             raise TLException("Duplicate temporary variable declared: '%s'" % varname)
         self.temp_variables[varname] = vartype
 
-class FunApp(Expression):
-    """ An expression for denoting a function application.  """
-    def __init__(self, func_expr, func_args = None, is_type_app = False):
-        super(FunApp, self).__init__()
-        self._is_type_app = is_type_app 
+class App(Expression):
+    """ Super class of all applications """
+    def __init__(self, func_expr, func_args = None):
+        super(App, self).__init__()
         self.func_expr = func_expr
         if func_args and type(func_args) is not list:
             func_args = [func_args]
         self.func_args = func_args
-
-    def __repr__(self):
-        return "<FunApp(0x%x) Expr = %s, Args = (%s)>" % (id(self), repr(self.func_expr), ", ".join(map(repr, self.func_args)))
 
     @property
     def is_type_app(self): return self._is_type_app
 
     def _evaltype(self, resolver_stack):
         resolved = self.resolve(resolver_stack)
-        if type(resolved) is FunApp:
+        if issubclass(resolved.__class__, App):
             resolved.func_expr.evaltype(resolver_stack)
         elif isinstance(resolved, Type):
             return resolved
@@ -304,14 +300,7 @@ class FunApp(Expression):
             ipdb.set_trace()
             assert False, "What now?"
 
-    def _resolve(self, resolver_stack):
-        """
-        Processes an expressions and resolves name bindings and creating new local vars 
-        in the process if required.
-        """
-        # First resolve the expression to get the source function
-        # Here we need to decide if the function needs to be "duplicated" for each different type
-        # This is where type re-ification is important - both at buildtime and runtime
+    def resolve_function(self, resolver_stack):
         function = self.func_expr.resolve(resolver_stack)
         if not function:
             raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
@@ -321,23 +310,60 @@ class FunApp(Expression):
 
         if type(function) is not Fun:
             raise errors.TLException("Fun '%s' is not a function" % (self.func_expr))
+        return function
 
-        if function.is_type_fun:
-            assert self.is_type_app
-            arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
-            return function.apply(arg_values, resolver_stack)
-        else:
-            arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
-            # Wont do currying for now
-            if len(arg_values) != len(function.source_typeargs):
-                raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
-                                                (function.name, len(function.source_typeargs), len(self.func_args)))
+class TypeApp(App):
+    """ An application of type functions instead of normal functions. """
+    def __init__(self, func_expr, func_args = None):
+        super(TypeApp, self).__init__(func_expr, func_args)
+        self._is_type_app = True
 
-            # TODO - check arg types match
+    def __repr__(self):
+        return "<TypeApp(0x%x) Expr = %s, Args = (%s)>" % (id(self), repr(self.func_expr), ", ".join(map(repr, self.func_args)))
 
-            # Only return a new expression if any thing has changed
-            if function != self.func_expr or any(x != y for x,y in zip(arg_values, self.func_args)):
-                return FunApp(function, arg_values)
+    def _resolve(self, resolver_stack):
+        """
+        Processes an expressions and resolves name bindings and creating new local vars 
+        in the process if required.
+        """
+        # First resolve the expression to get the source function
+        # Here we need to decide if the function needs to be "duplicated" for each different type
+        # This is where type re-ification is important - both at buildtime and runtime
+        function = self.resolve_function(resolver_stack)
+
+        assert self.is_type_app
+        arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
+        return function.apply(arg_values, resolver_stack)
+
+class FunApp(App):
+    """ An expression for denoting a function application.  """
+    def __init__(self, func_expr, func_args = None):
+        super(FunApp, self).__init__(func_expr, func_args)
+        self._is_type_app = False
+
+    def __repr__(self):
+        return "<FunApp(0x%x) Expr = %s, Args = (%s)>" % (id(self), repr(self.func_expr), ", ".join(map(repr, self.func_args)))
+
+    def _resolve(self, resolver_stack):
+        """
+        Processes an expressions and resolves name bindings and creating new local vars 
+        in the process if required.
+        """
+        # First resolve the expression to get the source function
+        # Here we need to decide if the function needs to be "duplicated" for each different type
+        # This is where type re-ification is important - both at buildtime and runtime
+        function = self.resolve_function(resolver_stack)
+
+        arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
+        # Wont do currying for now
+        if len(arg_values) != len(function.source_typeargs):
+            raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
+                                            (function.name, len(function.source_typeargs), len(self.func_args)))
+
+        # TODO - check arg types match
+        # Only return a new expression if any thing has changed
+        if function != self.func_expr or any(x != y for x,y in zip(arg_values, self.func_args)):
+            return FunApp(function, arg_values)
         return self
 
 def TypeFun(name, type_params, expression, parent, annotations = None, docs = ""):
