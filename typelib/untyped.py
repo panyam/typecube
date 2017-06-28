@@ -127,7 +127,7 @@ class Abs(Term):
         # First calculate all free variables
         term = normalize_term(term)
         if self.varname == varname:
-            # Do an alpha conversion of this expression but what name do we give this?
+            # Do an alpha conversion of this expr but what name do we give this?
             return self, True
 
         this = self
