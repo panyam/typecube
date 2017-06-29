@@ -1,6 +1,5 @@
 
 import ipdb
-import core
 from itertools import izip
 
 def can_substitute(peg_typeexpr, hole_typeexpr):
@@ -8,6 +7,7 @@ def can_substitute(peg_typeexpr, hole_typeexpr):
     Returns True if peg_type can fit into a hole_type (ie be substituted for when called as an argument to a function).
     This checks the types recursively.
     """
+    import core
     if not peg_typeexpr or not hole_typeexpr: ipdb.set_trace()
     ipdb.set_trace()
     resolved_peg = peg_typeexpr.resolved_value

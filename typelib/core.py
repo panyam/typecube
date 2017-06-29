@@ -6,7 +6,6 @@ from typelib import errors
 from typelib.utils import FieldPath
 from typelib.resolvers import Resolver, MapResolver, ResolverStack
 from typelib.annotations import Annotatable
-from typelib import unifier as tlunifier
 
 class Expr(object):
     """
@@ -224,12 +223,14 @@ class Fun(Expr, Annotatable):
 
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
+        from typelib import unifier as tlunifier
         assert type(input_typeexprs) is list
         if len(input_typeexprs) != len(self.source_typeargs):
             return False
         return all(tlunifier.can_substitute(st.type_expr, it) for (st,it) in izip(self.source_typeargs, input_typeexprs))
 
     def matches_output(self, output_typeexpr):
+        from typelib import unifier as tlunifier
         return tlunifier.can_substitute(output_typeexpr, self.dest_typearg.type_expr)
 
     def is_temp_variable(self, varname):
