@@ -44,6 +44,24 @@ class Assignment(Expr):
         resolved_expr = self.expr.resolve(resolver_stack)
         return self
 
+class Literal(Expr):
+    """
+    An expr that contains a literal value like a number, string, boolean, list, or map.
+    """
+    def __init__(self, value, value_type):
+        Expr.__init__(self)
+        self.value = value
+        self.value_type = value_type
+
+    def _evaltype(self, resolver_stack):
+        return self.value_type
+
+    def resolve(self, resolver):
+        return self
+
+    def __repr__(self):
+        return "<Literal(0x%x), Value: %s>" % (id(self), str(self.value))
+
 class ExprList(Expr):
     """ A list of statements. """
     def __init__(self, children = None):

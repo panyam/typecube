@@ -39,24 +39,6 @@ class Expr(object):
         assert False, "Not Implemented"
         return self
 
-class Literal(Expr):
-    """
-    An expr that contains a literal value like a number, string, boolean, list, or map.
-    """
-    def __init__(self, value, value_type):
-        Expr.__init__(self)
-        self.value = value
-        self.value_type = value_type
-
-    def _evaltype(self, resolver_stack):
-        return self.value_type
-
-    def resolve(self, resolver):
-        return self
-
-    def __repr__(self):
-        return "<Literal(0x%x), Value: %s>" % (id(self), str(self.value))
-
 class Variable(Expr):
     """ An occurence of a name that can be bound to a value, a field or a type. """
     def __init__(self, field_path):
@@ -79,7 +61,7 @@ class Variable(Expr):
             func = resolved.func_expr.resolve(resolver_stack)
             func_type = func.func_type.resolve(resolver_stack)
             return func_type.output_arg
-        if type(resolved) is Literal:
+        if issubclass(resolved.__class__, Expr):
             return resolved.evaltype(resolver_stack)
         ipdb.set_trace()
         assert False, "Unknown resolved value type"
