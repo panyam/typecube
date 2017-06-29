@@ -24,6 +24,11 @@ class Assignment(Expr):
         self.target_variable = target_variable
         self.expr = expr
 
+    def _equals(self, another):
+        return self.parent_function == another.parent_function and \
+                self.target_variable.equals(another.target_variable) and \
+                self.expr.equals(another.expr)
+
     def _evaltype(self, resolver_stack):
         resolved_expr = self.expr.resolve(resolver_stack)
         return resolved_expr.evaltype(resolver_stack)
@@ -52,6 +57,9 @@ class Literal(Expr):
         Expr.__init__(self)
         self.value = value
         self.value_type = value_type
+
+    def _equals(self, another):
+        return self.value == another.value and self.value_type.equals(another.value_type)
 
     def _evaltype(self, resolver_stack):
         return self.value_type

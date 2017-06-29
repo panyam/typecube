@@ -16,6 +16,12 @@ class Expr(object):
 
     #########
 
+    def equals(self, another):
+        return isinstance(another, self.__class__) and self._equals(another)
+
+    def _equals(self, another):
+        assert False, "Not Implemented"
+
     def evaltype(self, resolver_stack):
         # Do caching of results here based on resolver!
         return self._evaltype(resolver_stack)
@@ -46,6 +52,9 @@ class Variable(Expr):
             field_path = FieldPath(field_path)
         self.field_path = field_path
         assert type(field_path) is FieldPath and field_path.length > 0
+
+    def _equals(self, another):
+        return self.field_path.parts == another.field_path.parts
 
     def __repr__(self):
         return "<VarExp - ID: 0x%x, Value: %s>" % (id(self), str(self.field_path))
@@ -92,6 +101,11 @@ class Fun(Expr, Annotatable):
         self.expr = expr
         self.temp_variables = {}
         self._default_resolver_stack = None
+
+    def _equals(self, another):
+        return self.name == another.name and \
+                self.func_type.equals(another.func_type) and \
+                self.expr.equals(another.expr)
 
     @property
     def default_resolver_stack(self):
@@ -256,6 +270,11 @@ class App(Expr):
             func_args = [func_args]
         self.func_args = func_args
 
+    def _equals(self, another):
+        return self.is_type_app == another.is_type_app and \
+                self.func_expr.equals(another.func_expr) and \
+                self.func_args.equals(another.func_args)
+
     @property
     def is_type_app(self): return self._is_type_app
 
@@ -370,6 +389,13 @@ class Type(Expr, Annotatable):
         self.output_arg = output_arg if output_arg is None else validate_typearg(output_arg)
         self._default_resolver_stack = None
 
+    def _equals(self, another):
+        return self.name == another.name and \
+               self.constructor == another.constructor and \
+               self.parent == another.parent and \
+               (self.output_arg == another.output_arg or self.output_arg.equals(another.output_arg)) and \
+               self.args.equals(another.args)
+
     @property
     def default_resolver_stack(self):
         if self._default_resolver_stack is None:
@@ -416,6 +442,12 @@ class TypeArg(Expr, Annotatable):
         self.type_expr = type_expr
         self.is_optional = is_optional
         self.default_value = default_value or None
+
+    def _equals(self, another):
+        return self.name == another.name and \
+                self.is_optional == another.is_optional and \
+                self.default_value.equals(another.is_optional) and \
+                self.type_expr.equals(another.type_expr)
 
     def __json__(self, **kwargs):
         out = {}
@@ -467,6 +499,9 @@ class TypeArgList(object):
         self._type_args = []
         for type_arg in type_args or []:
             self.add(type_arg)
+
+    def equals(self, another):
+        return len(self._type_args) == len(self._type_args) and all(x.equals(y) for x,y in izip(self._type_args, another._type_args))
 
     def __getitem__(self, slice):
         return self._type_args.__getitem__(slice)

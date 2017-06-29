@@ -115,7 +115,8 @@ class Annotation(object):
         if type(param_specs) is dict:
             speciter = param_specs.iteritems()
         for k,v in speciter:
-            self._param_specs[k].append(v)
+            assert k not in self._param_specs, "Param %s already exists.  Consider using a list?" % k
+            self._param_specs[k] = v
 
     @property
     def name(self):
@@ -141,7 +142,7 @@ class Annotation(object):
         if self._value:
             return self._value
         elif self._param_specs:
-            return dict
+            return self.params
 
     def values_of(self, name):
         """
@@ -157,11 +158,10 @@ class Annotation(object):
         """
         vals = self.values_of(name)
         if vals is not None:
-            return vals[0]
+            return vals if type(vals) is not list else vals[0]
         return default_value
 
     def __repr__(self):
-        ipdb.set_trace()
         out = "<Annotation(0x%x), Name: %s" % (id(self), self.fqn)
         if self._value:
             out += ", Value: %s" % str(self._value)
