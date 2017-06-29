@@ -40,7 +40,7 @@ def normalize_type(t):
         return Type(t)
     elif type(t) is Type:
         return t
-    assert False, "Invalid type: ", t
+    assert False, ("Invalid type: ", t)
 
 class Type(object):
     """ Type objects.  Can be leaf types or function types. """
