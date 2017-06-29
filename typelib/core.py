@@ -113,6 +113,20 @@ class Fun(Expr, Annotatable):
     @property
     def is_external(self): return self.expr is None
 
+    def debug_show(self, level = 0):
+        function = self
+        print ("  " * (level)) + "SourceArgs:"
+        for typearg in function.func_type.args:
+            print ("  " * (level + 1)) + ("%s: %s" % (typearg.name,typearg))
+
+        print ("  " * (level)) + "OutputArg:"
+        if function.func_type.output_arg:
+            print ("  " * (level + 1)) + "%s" % function.func_type.output_arg
+
+        print ("  " * (level)) + "Locals:"
+        for key,value in self.temp_variables.iteritems():
+            print ("  " * (level + 1)) + ("%s: %s" % (key, value))
+
     def resolve_name(self, name):
         """ Try to resolve a name to a local, source or destination variable. """
         function = self
@@ -158,6 +172,7 @@ class Fun(Expr, Annotatable):
                 return self
             else:
                 # Create a curried function
+                ipdb.set_trace()
                 resolver_stack = resolver_stack.push(MapResolver(bindings))
                 out = self.expr.resolve(resolver_stack)
                 return out
