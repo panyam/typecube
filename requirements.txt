@@ -3,3 +3,4 @@ ipdb
 wheel
 PyYaml
 pytest
+pytest-mock

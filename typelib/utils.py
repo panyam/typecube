@@ -10,7 +10,7 @@ def signature_for_type(thetype, resolver, visited = None):
     if thetype.args:
         argsigs = []
         for arg in thetype.args:
-            if isinstance(arg.type_expr, Variable):
+            if isinstance(arg.type_expr, Var):
                 argsigs.append(str(arg.type_expr.field_path))
             elif isinstance(arg.type_expr, FunApp):
                 assert arg.type_expr.is_type_app

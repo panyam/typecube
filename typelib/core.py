@@ -1,5 +1,5 @@
 
-import ipdb
+from ipdb import set_trace
 from collections import defaultdict
 from itertools import izip
 from typelib import errors
@@ -27,7 +27,7 @@ class Expr(object):
         return self._evaltype(resolver_stack)
 
     def _evaltype(self, resolver_stack):
-        ipdb.set_trace()
+        set_trace()
         assert False, "not implemented"
         return None
 
@@ -44,10 +44,10 @@ class Expr(object):
         assert False, "Not Implemented"
         return self
 
-class Variable(Expr):
+class Var(Expr):
     """ An occurence of a name that can be bound to a value, a field or a type. """
     def __init__(self, field_path):
-        super(Variable, self).__init__()
+        super(Var, self).__init__()
         if type(field_path) in (str, unicode):
             field_path = FieldPath(field_path)
         self.field_path = field_path
@@ -64,14 +64,14 @@ class Variable(Expr):
         if type(resolved) is Type:
             return resolved
         if type(resolved) is Fun:
-            return resolved.func_type.resolve(resolver_stack)
+            return resolved.fun_type.resolve(resolver_stack)
         if issubclass(resolved.__class__, App):
             func = resolved.func_expr.resolve(resolver_stack)
-            func_type = func.func_type.resolve(resolver_stack)
-            return func_type.output_arg
+            fun_type = func.fun_type.resolve(resolver_stack)
+            return fun_type.output_arg
         if issubclass(resolved.__class__, Expr):
             return resolved.evaltype(resolver_stack)
-        ipdb.set_trace()
+        set_trace()
         assert False, "Unknown resolved value type"
 
     def _resolve(self, resolver_stack):
@@ -89,22 +89,22 @@ class Fun(Expr, Annotatable):
     Defines a function binding along with the mappings to each of the 
     specific backends.
     """
-    def __init__(self, name, func_type, expr, parent, annotations = None, docs = ""):
+    def __init__(self, name, fun_type, expr, parent, annotations = None, docs = ""):
         Expr.__init__(self)
         Annotatable.__init__(self, annotations, docs)
-        if type(func_type) is not Type:
-            ipdb.set_trace()
-        self._is_type_fun = all([a.type_expr == KindType for a in func_type.args])
+        if type(fun_type) is not Type:
+            set_trace()
+        self._is_type_fun = all([a.type_expr == KindType for a in fun_type.args])
         self.parent = parent
         self.name = name
-        self.func_type = func_type
+        self.fun_type = fun_type
         self.expr = expr
         self.temp_variables = {}
         self._default_resolver_stack = None
 
     def _equals(self, another):
         return self.name == another.name and \
-                self.func_type.equals(another.func_type) and \
+                self.fun_type.equals(another.fun_type) and \
                 self.expr.equals(another.expr)
 
     @property
@@ -119,8 +119,8 @@ class Fun(Expr, Annotatable):
             out["name"] = self.name
         if kwargs.get("include_docs", False) and self.docs:
             out["docs"] = self.docs
-        if self.func_type:
-            out["type"] = self.func_type.json(**kwargs)
+        if self.fun_type:
+            out["type"] = self.fun_type.json(**kwargs)
         return out
 
     @property
@@ -129,12 +129,12 @@ class Fun(Expr, Annotatable):
     def debug_show(self, level = 0):
         function = self
         print ("  " * (level)) + "SourceArgs:"
-        for typearg in function.func_type.args:
+        for typearg in function.fun_type.args:
             print ("  " * (level + 1)) + ("%s: %s" % (typearg.name,typearg))
 
         print ("  " * (level)) + "OutputArg:"
-        if function.func_type.output_arg:
-            print ("  " * (level + 1)) + "%s" % function.func_type.output_arg
+        if function.fun_type.output_arg:
+            print ("  " * (level + 1)) + "%s" % function.fun_type.output_arg
 
         print ("  " * (level)) + "Locals:"
         for key,value in self.temp_variables.iteritems():
@@ -145,13 +145,13 @@ class Fun(Expr, Annotatable):
         function = self
         # Check source types
         out_typearg = None
-        for typearg in function.func_type.args:
+        for typearg in function.fun_type.args:
             if typearg.name == name:
                 out_typearg = typearg
                 break
         else:
-            if function.func_type.output_arg and function.func_type.output_arg.name == name:
-                out_typearg = function.func_type.output_arg
+            if function.fun_type.output_arg and function.fun_type.output_arg.name == name:
+                out_typearg = function.fun_type.output_arg
             elif function.is_temp_variable(name):
                 # Check local variables
                 out_typearg = TypeArg(name, function.temp_var_type(name))
@@ -172,23 +172,18 @@ class Fun(Expr, Annotatable):
         if len(args) < len(self.source_typeargs):
             # Create a curried function since we have less arguments
             assert False, "Currying not yet implemented"
-            ipdb.set_trace()
 
-            new_func_type = self.func_type
-            new_expr = FunApp(self, args + [Variable(arg.name) for arg in new_func_type.source_typeargs])
-            out = Fun(self.name, new_func_type, new_expr, self.parent, self.annotations, self.docs)
+            new_fun_type = self.fun_type
+            new_expr = FunApp(self, args + [Var(arg.name) for arg in new_fun_type.source_typeargs])
+            out = Fun(self.name, new_fun_type, new_expr, self.parent, self.annotations, self.docs)
             return out
-        else:
-            if self.is_external:
-                # Nothing we can do so just return ourself
-                ipdb.set_trace()
-                return self
-            else:
-                # Create a curried function
-                ipdb.set_trace()
-                resolver_stack = resolver_stack.push(MapResolver(bindings))
-                out = self.expr.resolve(resolver_stack)
-                return out
+        elif not self.is_external:
+            # Create a curried function
+            resolver_stack = resolver_stack.push(MapResolver(bindings))
+            out = self.expr.resolve(resolver_stack)
+            return out
+        # Cannot do anything for external functions
+        return None
 
     def _resolve(self, resolver_stack):
         """
@@ -200,15 +195,15 @@ class Fun(Expr, Annotatable):
         if resolver_stack == None:
             resolver_stack = ResolverStack(self.parent, None)
         resolver_stack = resolver_stack.push(self)
-        new_func_type = self.func_type.resolve(resolver_stack)
+        new_fun_type = self.fun_type.resolve(resolver_stack)
         resolved_expr = None if not self.expr else self.expr.resolve(resolver_stack)
-        if new_func_type == self.func_type and resolved_expr == self.expr:
+        if new_fun_type == self.fun_type and resolved_expr == self.expr:
             return self
-        out = Fun(self.name, new_func_type, resolved_expr, self.parent, self.annotations, self.docs)
+        out = Fun(self.name, new_fun_type, resolved_expr, self.parent, self.annotations, self.docs)
         return out
 
     def _evaltype(self, resolver_stack):
-        return self.resolve(resolver_stack).func_type
+        return self.resolve(resolver_stack).fun_type
 
     @property
     def is_type_fun(self): return self._is_type_fun
@@ -225,15 +220,15 @@ class Fun(Expr, Annotatable):
 
     @property
     def source_typeargs(self):
-        return self.func_type.args
+        return self.fun_type.args
 
     @property
     def dest_typearg(self):
-        return self.func_type.output_arg
+        return self.fun_type.output_arg
 
     @property
     def returns_void(self):
-        return self.func_type.output_arg is None or self.func_type.output_arg.type_expr == VoidType
+        return self.fun_type.output_arg is None or self.fun_type.output_arg.type_expr == VoidType
 
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
@@ -255,7 +250,7 @@ class Fun(Expr, Annotatable):
 
     def register_temp_var(self, varname, vartype = None):
         assert type(varname) in (str, unicode)
-        if varname in (x.name for x in self.func_type.args):
+        if varname in (x.name for x in self.fun_type.args):
             raise TLException("Duplicate temporary variable '%s'.  Same as function arguments." % varname)
         elif self.is_temp_variable(varname) and self.temp_variables[varname] is not None:
             raise TLException("Duplicate temporary variable declared: '%s'" % varname)
@@ -285,7 +280,7 @@ class App(Expr):
         elif isinstance(resolved, Type):
             return resolved
         else:
-            ipdb.set_trace()
+            set_trace()
             assert False, "What now?"
 
     def resolve_function(self, resolver_stack):
@@ -311,17 +306,11 @@ class TypeApp(App):
 
     def _resolve(self, resolver_stack):
         """
-        Processes an exprs and resolves name bindings and creating new local vars 
-        in the process if required.
+        Applies the function to the arguments.
         """
-        # First resolve the expr to get the source function
-        # Here we need to decide if the function needs to be "duplicated" for each different type
-        # This is where type re-ification is important - both at buildtime and runtime
         function = self.resolve_function(resolver_stack)
-
-        assert self.is_type_app
         arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
-        return function.apply(arg_values, resolver_stack)
+        return function.apply(arg_values, resolver_stack) or self
 
 class FunApp(App):
     """ An expr for denoting a function application.  """
@@ -341,23 +330,23 @@ class FunApp(App):
         # Here we need to decide if the function needs to be "duplicated" for each different type
         # This is where type re-ification is important - both at buildtime and runtime
         function = self.resolve_function(resolver_stack)
-
         arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
+
         # Wont do currying for now
         if len(arg_values) != len(function.source_typeargs):
             raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
                                             (function.name, len(function.source_typeargs), len(self.func_args)))
 
         # TODO - check arg types match
-        # Only return a new expr if any thing has changed
         if function != self.func_expr or any(x != y for x,y in zip(arg_values, self.func_args)):
+            # Only return a new expr if any thing has changed
             return FunApp(function, arg_values)
         return self
 
 def TypeFun(name, type_params, expr, parent, annotations = None, docs = ""):
-    func_type = make_func_type(name, [TypeArg(tp,KindType) for tp in type_params], KindType)
+    fun_type = make_fun_type(name, [TypeArg(tp,KindType) for tp in type_params], KindType)
     # The shell/wrapper function that will return a copy of the given expr bound to values in here.
-    return Fun(name, func_type, expr, parent, annotations = annotations, docs = docs)
+    return Fun(name, fun_type, expr, parent, annotations = annotations, docs = docs)
 
 class Type(Expr, Annotatable):
     def __init__(self, constructor, name, type_args, output_arg, parent, annotations = None, docs = ""):
@@ -446,7 +435,7 @@ class TypeArg(Expr, Annotatable):
     def _equals(self, another):
         return self.name == another.name and \
                 self.is_optional == another.is_optional and \
-                self.default_value.equals(another.is_optional) and \
+                (self.default_value == another.default_value or self.default_value.equals(another.default_value)) and \
                 self.type_expr.equals(another.type_expr)
 
     def __json__(self, **kwargs):
@@ -478,7 +467,7 @@ class TypeArg(Expr, Annotatable):
             next_field_name, tail_path = field_path.pop()
             next_path = curr_path + "/" + next_field_name
             if curr_typearg is None:
-                ipdb.set_trace()
+                set_trace()
             next_typearg = curr_typearg.type_expr.resolve(resolver_stack).args.withname(next_field_name)
             curr_field_name, curr_path, field_path = next_field_name, next_path, tail_path
             yield curr_field_name, curr_path, curr_typearg
@@ -489,7 +478,7 @@ def validate_typearg(arg):
     elif issubclass(arg.__class__, Expr):
         return TypeArg(None, arg)
     elif type(arg) in (str, unicode):
-        return TypeArg(None, Variable(arg))
+        return TypeArg(None, Var(arg))
     else:
         raise errors.TLException("Argument must be a TypeArg, Expr or a string. Found: '%s'" % type(arg))
 
@@ -550,7 +539,7 @@ def make_literal_type(name, parent = None, annotations = None, docs = ""):
     return make_type("literal", name, type_args = None, output_arg = None,
                      parent = parent, annotations = annotations, docs = docs)
 
-def make_func_type(name, type_args, output_arg, parent = None, annotations = None, docs = ""):
+def make_fun_type(name, type_args, output_arg, parent = None, annotations = None, docs = ""):
     return make_type("function", name, type_args, output_arg,
                      parent = parent, annotations = annotations, docs = docs)
 

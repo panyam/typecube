@@ -23,7 +23,7 @@ class MapResolver(Resolver):
             print ("  " * (level + 1)) + ("%s: %s" % (key,value))
 
 class ResolverStack(Resolver):
-    def __init__(self, resolver, parent):
+    def __init__(self, resolver, parent = None):
         self.resolver = resolver
         self.parent = parent
 
