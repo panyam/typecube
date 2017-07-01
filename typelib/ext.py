@@ -1,6 +1,5 @@
 
 import ipdb
-from enum import Enum
 from typelib import core as tlcore
 from typelib.core import Expr
 from typelib.annotations import Annotatable
@@ -17,16 +16,30 @@ StringType = tlcore.make_literal_type("string")
 MapType = tlcore.TypeFun("map", ["K", "V"], tlcore.make_extern_type("map", ["K", "V"]), None)
 ListType = tlcore.TypeFun("list", ["V"], tlcore.make_extern_type("list", ["V"]), None)
 
+class NewExpr(Expr):
+    """ An expression used to create instead of a type.  It can be passed values for its child arguments.
+    This is just another shortcut for a function appication of a specific kind.
+    """
+    def __init__(self, objtype, **arg_values):
+        self.objtype = objtype
+        self.arg_values = arg_values or {}
+
+    def _evaltype(self, resolver_stack):
+        return self.objtype.resolve(resolver_stack)
+
+    def _resolve(self, resolver_stack):
+        resolved_objtype = self.objtype.resolve(resolver_stack)
+        resolved_args = {key: value.resolve(resolver_stack) for key,value in self.arg_values.iteritems()}
+        return self
+
 class Assignment(Expr):
-    def __init__(self, parent_function, target_variable, expr):
+    def __init__(self, target_variable, expr):
         Expr.__init__(self)
-        self.parent_function = parent_function
         self.target_variable = target_variable
         self.expr = expr
 
     def _equals(self, another):
-        return self.parent_function == another.parent_function and \
-                self.target_variable.equals(another.target_variable) and \
+        return self.target_variable.equals(another.target_variable) and \
                 self.expr.equals(another.expr)
 
     def _evaltype(self, resolver_stack):
@@ -79,6 +92,12 @@ class ExprList(Expr):
     def add(self, expr):
         self.children.append(expr)
 
+    def extend(self, another):
+        if type(another) is ExprList:
+            self.children.extend(another.children)
+        else:
+            self.add(another)
+
     def _evaltype(self, resolver_stack):
         resolved = self.resolve(resolver_stack)
         return resolved.children[-1].evaltype(resolver_stack)
@@ -90,13 +109,14 @@ class ExprList(Expr):
         return self
 
 class DictExpr(Expr):
-    def __init__(self, values):
+    def __init__(self, keys, values):
         super(DictExpr, self).__init__()
+        self.keys = keys
         self.values = values
+        assert len(keys) == len(values)
 
     def _resolve(self, resolver_stack):
-        ipdb.set_trace()
-        for key,value in self.values.iteritems():
+        for key,value in izip(self.keys, self.values):
             key.resolve(resolver_stack)
             value.resolve(resolver_stack)
 

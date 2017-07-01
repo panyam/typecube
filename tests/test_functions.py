@@ -67,3 +67,37 @@ def test_type_app(mocker):
     assert value.args[1].type_expr == args[1]
     assert value.output_arg.name == "dest"
     assert value.output_arg.type_expr == args[2]
+
+def test_recursive_type(mocker):
+    """ Something a bit more complex.  
+
+    Recursion:
+        record TreeNode <NodeType> {
+            value : NodeType
+            left : TreeNode<NodeType>?
+            right : TreeNode<NodeType>?
+        }
+    """
+    expr = Type("record", "TreeNode",
+                [
+                    TypeArg("value", Var("NodeType")),
+                    TypeArg("left", TypeApp(Var("TreeNode"), Var("NodeType")), is_optional = True),
+                    TypeArg("right", TypeApp(Var("TreeNode"), Var("NodeType")), is_optional = True)
+                ],
+                None,
+                None)
+    typefun = Fun(None, funtype("NodeType", Type, None, Type), expr, None)
+    mocker.spy(typefun, 'apply')
+    resolver_stack = ResolverStack(MapResolver({"TreeNode":  typefun}))
+    args = [IntType]
+    app = TypeApp(Var("TreeNode"), args)
+    value = app.resolve(resolver_stack)
+    assert fun.apply.call_count == 1
+    assert value.name == "Tree"
+    assert value.constructor == "record"
+    assert value.args[0].name == "first"
+    assert value.args[0].type_expr == args[0]
+    assert value.args[1].name == "second"
+    assert value.args[1].type_expr == args[1]
+    assert value.output_arg.name == "dest"
+    assert value.output_arg.type_expr == args[2]
