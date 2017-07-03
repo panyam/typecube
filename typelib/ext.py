@@ -90,6 +90,9 @@ class ExprList(Expr):
         self.children = children or []
 
     def add(self, expr):
+        if not issubclass(expr.__class__, Expr):
+            ipdb.set_trace()
+            assert issubclass(expr.__class__, Expr), "Cannot add non Expr instances to an ExprList"
         self.children.append(expr)
 
     def extend(self, another):
