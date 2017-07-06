@@ -172,7 +172,7 @@ class IfExpr(Expr):
         self.default_expr = default_expr or []
 
     def __repr__(self):
-        return "<CondExp - ID: 0x%x>" % (id(self))
+        return "<IfExp - ID: 0x%x>" % (id(self))
 
     def set_evaluated_typeexpr(self, vartype):
         assert False, "cannot set evaluated type of an If expr (yet)"
