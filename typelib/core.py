@@ -287,7 +287,7 @@ class App(Expr):
         function = self.func_expr.resolve(resolver_stack)
         if not function:
             raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
-        while type(function) is Type and function.constructor == "typeref":
+        while type(function) is Type and function.category == "typeref":
             assert len(function.args) == 1, "Typeref cannot have more than one child argument"
             function = function.args[0].type_expr.resolve(function.default_resolver_stack)
 
@@ -349,13 +349,13 @@ def TypeFun(name, type_params, expr, parent, annotations = None, docs = ""):
     return Fun(name, fun_type, expr, parent, annotations = annotations, docs = docs)
 
 class Type(Expr, Annotatable):
-    def __init__(self, constructor, name, type_args, output_arg, parent, annotations = None, docs = ""):
+    def __init__(self, category, name, type_args, output_arg, parent, annotations = None, docs = ""):
         """
         Creates a new type function.  Type functions are responsible for creating concrete type instances
         or other (curried) type functions.
 
         Params:
-            constructor     The type's constructor, eg "record", "int" etc.  This is not the name 
+            category     The type's category, eg "record", "literal" etc.  This is not the name 
                             of the type itself but a name that indicates a class of this type.
             name            Name of the type.
             type_args       Type arguments are fields/children of a given type are themselves exprs 
@@ -368,10 +368,10 @@ class Type(Expr, Annotatable):
         Annotatable.__init__(self, annotations = annotations, docs = docs)
         Expr.__init__(self)
 
-        if type(constructor) not in (str, unicode):
-            raise errors.TLException("constructor must be a string")
+        if type(category) not in (str, unicode):
+            raise errors.TLException("category must be a string")
 
-        self.constructor = constructor
+        self.category = category
         self.parent = parent
         self.name = name
         self.args = TypeArgList(type_args)
@@ -380,7 +380,7 @@ class Type(Expr, Annotatable):
 
     def _equals(self, another):
         return self.name == another.name and \
-               self.constructor == another.constructor and \
+               self.category == another.category and \
                self.parent == another.parent and \
                (self.output_arg == another.output_arg or self.output_arg.equals(another.output_arg)) and \
                self.args.equals(another.args)
@@ -407,7 +407,7 @@ class Type(Expr, Annotatable):
         new_type_args = [arg.resolve(resolver_stack) for arg in self.args]
         new_output_arg = None if not self.output_arg else self.output_arg.resolve(resolver_stack)
         if new_output_arg != self.output_arg or any(x != y for x,y in zip(new_type_args, self.args)):
-            return Type(self.constructor, self.name, new_type_args, new_output_arg, self.parent, self.annotations, self.docs)
+            return Type(self.category, self.name, new_type_args, new_output_arg, self.parent, self.annotations, self.docs)
         return self
 
     def __json__(self, **kwargs):
@@ -417,7 +417,7 @@ class Type(Expr, Annotatable):
         if kwargs.get("include_docs", False) and self.docs:
             out["docs"] = self.docs
         if not kwargs.get("no_cons", False):
-            out["type"] = self.constructor
+            out["type"] = self.category
         if self.args:
             out["args"] = [arg.json(**kwargs) for arg in self.args]
         return out
@@ -531,8 +531,8 @@ class TypeArgList(object):
                 raise errors.TLException("Child type by the given name '%s' already exists" % arg.name)
         self._type_args.append(arg)
 
-def make_type(constructor, name, type_args, output_arg, parent = None, annotations = None, docs = ""):
-    return Type(constructor, name, type_args = type_args, output_arg = output_arg,
+def make_type(category, name, type_args, output_arg, parent = None, annotations = None, docs = ""):
+    return Type(category, name, type_args = type_args, output_arg = output_arg,
                  parent = parent, annotations = annotations, docs = docs)
 
 def make_literal_type(name, parent = None, annotations = None, docs = ""):

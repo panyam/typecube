@@ -20,7 +20,7 @@ def can_substitute(peg_typeexpr, hole_typeexpr):
     if type(resolved_peg) is core.Fun or type(resolved_hole) is core.Fun:
         ipdb.set_trace()
 
-    if resolved_peg.constructor != resolved_hole.constructor:
+    if resolved_peg.category != resolved_hole.category:
         return False
 
     if resolved_peg.name != resolved_hole.name:

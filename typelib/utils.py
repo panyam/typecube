@@ -5,8 +5,8 @@ def signature_for_type(thetype, resolver, visited = None):
     if thetype.name:
         signature = thetype.name
     else:
-        assert thetype.constructor is not None
-        signature = thetype.constructor
+        assert thetype.category is not None
+        signature = thetype.category
     if thetype.args:
         argsigs = []
         for arg in thetype.args:
@@ -30,10 +30,10 @@ def signature_for_typeexpr(type_expr, resolver, visited = None, signature_for_ty
 
 def ensure_types(**conditions):
     """ A decorator when applied to a function performs type checking on the arguments passed to it. """
-    def constructor(target_func, *args, **kwargs):
+    def category(target_func, *args, **kwargs):
         a = conditions
         ipdb.set_trace()
-    return constructor
+    return category
 
 class FQN(object):
     def __init__(self, name, namespace, ensure_namespaces_are_equal = True):
