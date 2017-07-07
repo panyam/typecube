@@ -93,9 +93,6 @@ class Fun(Expr, Annotatable):
     def __init__(self, fqn, fun_type, expr, parent, annotations = None, docs = ""):
         Expr.__init__(self)
         Annotatable.__init__(self, annotations, docs)
-        if type(fun_type) is not Type:
-            set_trace()
-        self._is_type_fun = all([a.type_expr == KindType for a in fun_type.args])
         self.parent = parent
         self.fqn = fqn
         self.fun_type = fun_type
@@ -205,9 +202,6 @@ class Fun(Expr, Annotatable):
 
     def _evaltype(self, resolver_stack):
         return self.resolve(resolver_stack).fun_type
-
-    @property
-    def is_type_fun(self): return self._is_type_fun
 
     def __repr__(self):
         return "<%s(0x%x) %s>" % (self.__class__.__name__, id(self), self.fqn)
@@ -367,7 +361,7 @@ class Type(Expr, Annotatable):
         if type(category) is not TypeCategory:
             raise errors.TLException("category must be a TypeCategory")
 
-        self.is_extern = False
+        self.is_external = False
         self.category = category
         self.parent = parent
         self.fqn = fqn
@@ -426,14 +420,14 @@ class TypeFun(Type):
     def __init__(self, fqn, type_params, type_expr, parent, annotations = None, docs = ""):
         type_args = [TypeArg(tp,KindType) for tp in type_params] + [TypeArg(None, type_expr if type_expr else KindType)]
         Type.__init__(self, TypeCategory.ABSTRACTION, fqn, type_args, parent, annotations = None, docs = "")
-        self.is_extern = type_expr is None
+        self.is_external = type_expr is None
 
     @property
     def is_type_function(self):
         return True
 
     @property
-    def output_typearg(self):
+    def result_typearg(self):
         return self.args[-1]
 
 class TypeApp(Type):
