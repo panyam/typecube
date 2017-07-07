@@ -13,8 +13,8 @@ LongType = tlcore.make_literal_type("long")
 FloatType = tlcore.make_literal_type("float")
 DoubleType = tlcore.make_literal_type("double")
 StringType = tlcore.make_literal_type("string")
-MapType = tlcore.TypeFun("map", ["K", "V"], tlcore.make_extern_type("map", ["K", "V"]), None)
-ListType = tlcore.TypeFun("list", ["V"], tlcore.make_extern_type("list", ["V"]), None)
+MapType = tlcore.make_type_fun("map", ["K", "V"], None, None)
+ListType = tlcore.make_type_fun("list", ["V"], None, None)
 
 class NewExpr(Expr):
     """ An expression used to create instead of a type.  It can be passed values for its child arguments.

@@ -3,14 +3,14 @@ import core
 from typelib.annotations import Annotatable
 import utils
 
-def EnumSymbol(name, parent, value = None, annotations = None, docs = ""):
-    out = core.make_literal_type(name, parent, annotations = annotations, docs = docs)
+def EnumSymbol(fqn, parent, value = None, annotations = None, docs = ""):
+    out = core.make_literal_type(fqn, parent, annotations = annotations, docs = docs)
     out.value = value
     return out
 
-def EnumType(name, parent, symbols = None, type_args = None, annotations = None, docs = None):
-    out = core.make_type("enum", name, type_args, parent, annotations = annotations, docs = docs)
+def EnumType(fqn, parent, symbols = None, type_args = None, annotations = None, docs = None):
+    out = core.make_type(core.TypeCategory.SUM_TYPE, fqn, type_args, parent, annotations = annotations, docs = docs)
     for symbol in symbols or []:
-        out.args.add(core.TypeArg(symbol.name, symbol))
+        out.args.add(core.TypeArg(symbol.fqn, symbol))
     return out
 
