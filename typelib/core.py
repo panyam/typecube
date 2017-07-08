@@ -100,6 +100,12 @@ class Fun(Expr, Annotatable):
         self.temp_variables = {}
         self._default_resolver_stack = None
 
+    @property
+    def default_resolver_stack(self):
+        if self._default_resolver_stack is None:
+            self._default_resolver_stack = ResolverStack(self.parent, None).push(self)
+        return self._default_resolver_stack
+
     def _equals(self, another):
         return self.fqn == another.fqn and \
                 self.fun_type.equals(another.fun_type) and \
@@ -108,12 +114,6 @@ class Fun(Expr, Annotatable):
     @property
     def name(self):
         return self.fqn.split(".")[-1]
-
-    @property
-    def default_resolver_stack(self):
-        if self._default_resolver_stack is None:
-            self._default_resolver_stack = ResolverStack(self.parent, None).push(self)
-        return self._default_resolver_stack
 
     def __json__(self, **kwargs):
         out = {}
@@ -268,6 +268,7 @@ class FunApp(Expr):
             function = function.args[0].type_expr.resolve(function.default_resolver_stack)
 
         if type(function) is not Fun:
+            set_trace()
             raise errors.TLException("Fun '%s' is not a function" % (self.func_expr))
         return function
 
@@ -362,6 +363,13 @@ class Type(Expr, Annotatable):
         self.args = TypeArgList(type_args)
         self._default_resolver_stack = None
 
+    @property
+    def default_resolver_stack(self):
+        set_trace()
+        if self._default_resolver_stack is None:
+            self._default_resolver_stack = ResolverStack(self.parent, None)
+        return self._default_resolver_stack
+
     def _equals(self, another):
         return self.fqn == another.fqn and \
                self.category == another.category and \
@@ -371,12 +379,6 @@ class Type(Expr, Annotatable):
     @property
     def name(self):
         return self.fqn.split(".")[-1]
-
-    @property
-    def default_resolver_stack(self):
-        if self._default_resolver_stack is None:
-            self._default_resolver_stack = ResolverStack(self.parent, None)
-        return self._default_resolver_stack
 
     def _evaltype(self, resolver_stack):
         """ Type of a "Type" is a KindType!!! """
@@ -434,9 +436,14 @@ class TypeFun(Type):
     def is_type_function(self):
         return True
 
-    @property
-    def result_typearg(self):
-        return self.args[-1]
+    def resolve_name(self, name, condition = None):
+        set_trace()
+        for arg in self.args:
+            if arg.name == name:
+                if condition is None or condition(out):
+                    return out
+                break
+        return None
 
 class TypeApp(Type):
     def __init__(self, type_func, type_args, parent, annotations = None, docs = ""):
@@ -599,7 +606,12 @@ def make_alias(fqn, type_expr, parent = None, annotations = None, docs = ""):
                             parent = parent, annotations = annotations, docs = docs)
 
 def make_type_fun(fqn, type_params, expr, parent, annotations = None, docs = ""):
-    return TypeFun(fqn, type_params, expr, parent, annotations = None, docs = "")
+    newtype = TypeFun(fqn, type_params, expr, parent, annotations = None, docs = "")
+    if expr:
+        # if not issubclass(expr.__class__, Type): set_trace()
+        assert issubclass(expr.__class__, Type), "We dont do dependant types yet!"
+        expr.parent = newtype
+    return newtype
 
 def make_ref(target_fqn, parent = None, annotations = None, docs = None):
     return TypeRef(target_fqn, parent, annotations = annotations, docs = docs)
