@@ -365,7 +365,6 @@ class Type(Expr, Annotatable):
 
     @property
     def default_resolver_stack(self):
-        set_trace()
         if self._default_resolver_stack is None:
             self._default_resolver_stack = ResolverStack(self.parent, None)
         return self._default_resolver_stack
@@ -437,11 +436,10 @@ class TypeFun(Type):
         return True
 
     def resolve_name(self, name, condition = None):
-        set_trace()
         for arg in self.args:
             if arg.name == name:
-                if condition is None or condition(out):
-                    return out
+                if condition is None or condition(arg.type_expr):
+                    return arg.type_expr
                 break
         return None
 
@@ -520,8 +518,6 @@ class TypeArg(Expr, Annotatable):
         while field_path.length > 0:
             next_field_name, tail_path = field_path.pop()
             next_path = curr_path + "/" + next_field_name
-            if curr_typearg is None:
-                set_trace()
             next_typearg = curr_typearg.type_expr.resolve(resolver_stack).args.withname(next_field_name)
             curr_field_name, curr_path, field_path = next_field_name, next_path, tail_path
             yield curr_field_name, curr_path, curr_typearg
