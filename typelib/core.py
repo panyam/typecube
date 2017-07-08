@@ -106,6 +106,10 @@ class Fun(Expr, Annotatable):
                 self.expr.equals(another.expr)
 
     @property
+    def name(self):
+        return self.fqn.split(".")[-1]
+
+    @property
     def default_resolver_stack(self):
         if self._default_resolver_stack is None:
             self._default_resolver_stack = ResolverStack(self.parent, None).push(self)
@@ -148,8 +152,8 @@ class Fun(Expr, Annotatable):
                 out_typearg = typearg
                 break
         else:
-            if function.fun_type.output_arg and function.fun_type.output_arg.name == name:
-                out_typearg = function.fun_type.output_arg
+            if function.fun_type.return_typearg.name == name and not function.fun_type.returns_void:
+                out_typearg = function.fun_type.return_typearg
             elif function.is_temp_variable(name):
                 # Check local variables
                 out_typearg = TypeArg(name, function.temp_var_type(name))
@@ -206,18 +210,6 @@ class Fun(Expr, Annotatable):
     def __repr__(self):
         return "<%s(0x%x) %s>" % (self.__class__.__name__, id(self), self.fqn)
 
-    @property
-    def source_typeargs(self):
-        return self.fun_type.args
-
-    @property
-    def dest_typearg(self):
-        return self.fun_type.output_arg
-
-    @property
-    def returns_void(self):
-        return self.fun_type.output_arg is None or self.fun_type.output_arg.type_expr == VoidType
-
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
         from typelib import unifier as tlunifier
@@ -271,7 +263,7 @@ class FunApp(Expr):
         function = self.func_expr.resolve(resolver_stack)
         if not function:
             raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
-        while type(function) is Type and function.category == "typeref":
+        while type(function) is Type and function.category == TypeCategory.ALIAS_TYPE:
             assert len(function.args) == 1, "Typeref cannot have more than one child argument"
             function = function.args[0].type_expr.resolve(function.default_resolver_stack)
 
@@ -361,20 +353,24 @@ class Type(Expr, Annotatable):
         if type(category) is not TypeCategory:
             raise errors.TLException("category must be a TypeCategory")
 
+        # tag can indicate a further specialization of the type - eg "record", "enum" etc
+        self.tag = None
         self.is_external = False
         self.category = category
         self.parent = parent
         self.fqn = fqn
         self.args = TypeArgList(type_args)
-        # self.output_arg = output_arg if output_arg is None else validate_typearg(output_arg)
         self._default_resolver_stack = None
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
                self.category == another.category and \
                self.parent == another.parent and \
-               (self.output_arg == another.output_arg or self.output_arg.equals(another.output_arg)) and \
                self.args.equals(another.args)
+
+    @property
+    def name(self):
+        return self.fqn.split(".")[-1]
 
     @property
     def default_resolver_stack(self):
@@ -389,10 +385,23 @@ class Type(Expr, Annotatable):
     def _resolve(self, resolver_stack):
         """ Default resolver for just resolving all child argument types. """
         new_type_args = [arg.resolve(resolver_stack) for arg in self.args]
-        new_output_arg = None if not self.output_arg else self.output_arg.resolve(resolver_stack)
-        if new_output_arg != self.output_arg or any(x != y for x,y in zip(new_type_args, self.args)):
-            return Type(self.category, self.fqn, new_type_args, new_output_arg, self.parent, self.annotations, self.docs)
+        if any(x != y for x,y in zip(new_type_args, self.args)):
+            return Type(self.category, self.fqn, new_type_args, self.parent, self.annotations, self.docs)
         return self
+
+    @property
+    def return_typearg(self):
+        assert self.category is TypeCategory.FUNCTION_TYPE or self.is_type_function
+        return self.args[-1]
+
+    @property
+    def source_typeargs(self):
+        assert self.category is TypeCategory.FUNCTION_TYPE or self.is_type_function
+        return self.args[:-1]
+
+    @property
+    def returns_void(self):
+        return self.return_typearg.type_expr == VoidType
 
     @property
     def is_type_function(self):
@@ -409,12 +418,11 @@ class Type(Expr, Annotatable):
         return out
 
 class TypeRef(Type):
-    def __init__(self, fqn, target_fqn, parent, annotations = None, docs = ""):
-        type_args = [TypeArg(None, make_literal_type(target_fqn))]
-        Type.__init__(self, TypeCategory.TYPEREF, fqn, type_args, parent, annotations = None, docs = "")
+    def __init__(self, target_fqn, parent, annotations = None, docs = ""):
+        Type.__init__(self, TypeCategory.TYPEREF, target_fqn, None, parent, annotations = None, docs = "")
 
     def _resolve(self, resolver_stack):
-        set_trace()
+        return resolver_stack.resolve_name(self.fqn)
 
 class TypeFun(Type):
     def __init__(self, fqn, type_params, type_expr, parent, annotations = None, docs = ""):
@@ -453,7 +461,7 @@ class TypeApp(Type):
         typefun = func_expr.resolve(resolver_stack)
         if not typefun:
             raise errors.TLException("Fun '%s' is undefined" % func_expr)
-        while typefun.category == "typeref":
+        while typefun.category == TypeCategory.ALIAS_TYPE:
             assert len(typefun.args) == 1, "Typeref cannot have more than one child argument"
             typefun = typefun.args[0].type_expr.resolve(typefun.default_resolver_stack)
 
@@ -570,33 +578,40 @@ class TypeArgList(object):
                 raise errors.TLException("Child type by the given name '%s' already exists" % arg.name)
         self._type_args.append(arg)
 
-def make_type(category, fqn, type_args, parent = None, annotations = None, docs = ""):
-    return Type(category, fqn, type_args = type_args, parent = parent, annotations = annotations, docs = docs)
+def make_tagged_type(tag, category, fqn, type_args, parent = None, annotations = None, docs = ""):
+    out = Type(category, fqn, type_args = type_args, parent = parent, annotations = annotations, docs = docs)
+    out.tag = tag
+    return out
 
 def make_literal_type(fqn, parent = None, annotations = None, docs = ""):
-    return make_type(TypeCategory.LITERAL_TYPE, fqn, type_args = None, parent = parent, annotations = annotations, docs = docs)
+    return make_tagged_type(None, TypeCategory.LITERAL_TYPE, fqn, type_args = None,
+                            parent = parent, annotations = annotations, docs = docs)
 
 def make_fun_type(fqn, type_args, output_arg, parent = None, annotations = None, docs = ""):
     if output_arg is None:
         output_arg = VoidType
     args = type_args + [output_arg]
-    return make_type(TypeCategory.FUNCTION_TYPE, fqn, args,
-                     parent = parent, annotations = annotations, docs = docs)
+    return make_tagged_type(None, TypeCategory.FUNCTION_TYPE, fqn, args,
+                            parent = parent, annotations = annotations, docs = docs)
 
 def make_alias(fqn, type_expr, parent = None, annotations = None, docs = ""):
-    return make_type(TypeCategory.ALIAS_TYPE, fqn, type_args = [type_expr], 
-                     parent = parent, annotations = annotations, docs = docs)
+    return make_tagged_type(None, TypeCategory.ALIAS_TYPE, fqn, type_args = [type_expr], 
+                            parent = parent, annotations = annotations, docs = docs)
 
 def make_type_fun(fqn, type_params, expr, parent, annotations = None, docs = ""):
     return TypeFun(fqn, type_params, expr, parent, annotations = None, docs = "")
 
-def make_ref(fqn, target_fqn, parent = None, annotations = None, docs = None):
-    return TypeRef(fqn, target_fqn, parent, annotations = annotations, docs = docs)
+def make_ref(target_fqn, parent = None, annotations = None, docs = None):
+    return TypeRef(target_fqn, parent, annotations = annotations, docs = docs)
 
 def make_type_app(type_func_expr, type_args, parent = None, annotations = None, docs = ""):
     if type(type_func_expr) in (str, unicode):
-        type_func_expr = make_ref(None, type_func_expr)
+        type_func_expr = make_ref(type_func_expr)
     return TypeApp(type_func_expr, type_args, parent, annotations, docs)
+
+def make_enum_type(fqn, parent = None, annotations = None, docs = None):
+    return make_tagged_type("enum", TypeCategory.SUM_TYPE, fqn, None,
+                            parent, annotations = annotations, docs = docs)
 
 KindType = make_literal_type("Type")
 AnyType = make_literal_type("any")

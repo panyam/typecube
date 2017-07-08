@@ -201,6 +201,9 @@ class FieldPath(object):
     def pop(self):
         return self._parts[0], FieldPath(self._parts[1:], self._children_copy)
 
+    def poptail(self):
+        return self._parts[-1], FieldPath(self._parts[:-1], self._children_copy)
+
     def push(self, part):
         return FieldPath([part] + self._parts[:], self._children_copy)
 
