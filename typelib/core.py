@@ -5,17 +5,28 @@ from collections import defaultdict
 from itertools import izip
 from typelib import errors
 from typelib.utils import FieldPath
-from typelib.resolvers import Resolver, MapResolver, ResolverStack
 from typelib.annotations import Annotatable
 
-class Expr(object):
+class NameResolver(object):
+    def resolve_name(self, name, condition = None):
+        """ Tries to resolve a name in this expression. """
+        value = self._resolve_name(name, condition)
+        if value and (condition is None or condition(value)):
+            return value, self
+        if self.parent:     # Try the parent expression
+            return self.parent.resolve_name(name, condition)
+        raise errors.TLException("Unable to resolve name: %s" % name)
+
+class Expr(NameResolver):
     """
     Parent of all exprs.  All exprs must have a value.  Exprs only appear in functions.
     """
-    def __init__(self):
-        pass
+    def __init__(self, parent):
+        self.parent = parent
 
     #########
+    def _resolve_name(self, name, condition = None):
+        return None
 
     def equals(self, another):
         return isinstance(another, self.__class__) and self._equals(another)
@@ -27,14 +38,14 @@ class Expr(object):
         # Do caching of results here based on resolver!
         return self._evaltype(resolver_stack)
 
-    def _evaltype(self, resolver_stack):
+    def _evaltype(self):
         set_trace()
         assert False, "not implemented"
         return None
 
-    def resolve(self, resolver):
+    def resolve(self):
         # Do caching of results here based on resolver!
-        return self._resolve(resolver)
+        return self._resolve()
 
     def _resolve(self, resolver_stack):
         """ This method resolves a type expr to a type object. 
@@ -98,13 +109,6 @@ class Fun(Expr, Annotatable):
         self.fun_type = fun_type
         self.expr = expr
         self.temp_variables = {}
-        self._default_resolver_stack = None
-
-    @property
-    def default_resolver_stack(self):
-        if self._default_resolver_stack is None:
-            self._default_resolver_stack = ResolverStack(self.parent, None).push(self)
-        return self._default_resolver_stack
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
@@ -163,29 +167,6 @@ class Fun(Expr, Annotatable):
                 # TODO: *something?*
                 pass
         return out_typearg
-
-    def apply(self, args, resolver_stack):
-        """ Apply this function's expr to a bunch of arguments and return a resultant expr. """
-        assert len(args) <= len(self.source_typeargs), "Too many arguments provided."
-
-        argnames = [arg.name for arg in self.source_typeargs]
-        bindings = dict(zip(argnames, args))
-
-        if len(args) < len(self.source_typeargs):
-            # Create a curried function since we have less arguments
-            assert False, "Currying not yet implemented"
-
-            new_fun_type = self.fun_type
-            new_expr = FunApp(self, args + [Var(arg.name) for arg in new_fun_type.source_typeargs])
-            out = Fun(self.name, new_fun_type, new_expr, self.parent, self.annotations, self.docs)
-            return out
-        elif not self.is_external:
-            # Create a curried function
-            resolver_stack = resolver_stack.push(MapResolver(bindings))
-            out = self.expr.resolve(resolver_stack)
-            return out
-        # Cannot do anything for external functions
-        return None
 
     def _resolve(self, resolver_stack):
         """
@@ -361,13 +342,6 @@ class Type(Expr, Annotatable):
         self.parent = parent
         self.fqn = fqn
         self.args = TypeArgList(type_args)
-        self._default_resolver_stack = None
-
-    @property
-    def default_resolver_stack(self):
-        if self._default_resolver_stack is None:
-            self._default_resolver_stack = ResolverStack(self.parent, None)
-        return self._default_resolver_stack
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
