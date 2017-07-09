@@ -7,6 +7,8 @@ from typelib import errors
 from typelib.utils import FieldPath
 from typelib.annotations import Annotatable
 
+def istype(t): return issubclass(t.__class__, Type)
+
 class NameResolver(object):
     def resolve_name(self, name, condition = None):
         """ Tries to resolve a name in this expression. """
@@ -22,7 +24,22 @@ class Expr(NameResolver):
     Parent of all exprs.  All exprs must have a value.  Exprs only appear in functions.
     """
     def __init__(self, parent = None):
-        self.parent = parent
+        self._parent = parent
+
+    @property
+    def parent(self):
+        return self._parent
+
+    @parent.setter
+    def parent(self, value):
+        if self._parent is not None and value != self._parent:
+            set_trace()
+        oldvalue = self._parent
+        self._parent = value
+        self.parent_changed(oldvalue)
+
+    def parent_changed(self, oldvalue):
+        pass
 
     #########
     def ensure_parents(self):
@@ -33,7 +50,9 @@ class Expr(NameResolver):
         pass
 
     def resolve_name(self, name, condition = None):
-        assert self.parent is not None, "Parent of %s is None" % type(self)
+        if self.parent is None:
+            set_trace()
+            assert self.parent is not None, "Parent of %s is None" % type(self)
         return NameResolver.resolve_name(self, name, condition)
 
     def _resolve_name(self, name, condition = None):
@@ -85,6 +104,7 @@ class Var(Expr):
     def _evaltype(self):
         resolved = self.resolve()
         if type(resolved) is Type:
+            set_trace()
             return resolved
         if type(resolved) is Fun:
             return resolved.fun_type.resolve()
@@ -117,18 +137,11 @@ class Fun(Expr, Annotatable):
         Annotatable.__init__(self, annotations, docs)
         self.fqn = fqn
         self.fun_type = fun_type
-        self.expr = expr
-        self.temp_variables = {}
-
-    def ensure_parents(self):
-        """ Ensures that all children have the parents setup correctly.  
-        Assumes that the parent of this expression is set corrected before this is called.
-        """
         self.fun_type.parent = self.parent
-        self.fun_type.ensure_parents()
+        self.expr = expr
         if self.expr:
             self.expr.parent = self
-            self.expr.ensure_parents()
+        self.temp_variables = {}
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
@@ -166,27 +179,38 @@ class Fun(Expr, Annotatable):
         for key,value in self.temp_variables.iteritems():
             print ("  " * (level + 1)) + ("%s: %s" % (key, value))
 
-    def resolve_name(self, name):
+    def _resolve_name(self, name, condition = None):
         """ Try to resolve a name to a local, source or destination variable. """
-        function = self
         # Check source types
         out_typearg = None
-        for typearg in function.fun_type.args:
+        fun_type = self.fun_type
+        if fun_type.is_type_function:
+            # Since this is a type function, also check parameters
+            for param in fun_type.type_params:
+                if param == name:
+                    return KindType
+            
+            # Did not match any type params
+            fun_type = fun_type.type_expr.resolve()
+            assert fun_type.is_function_type
+
+        for typearg in fun_type.source_typeargs:
             if typearg.name == name:
                 out_typearg = typearg
-                break
-        else:
-            if function.fun_type.return_typearg.name == name and not function.fun_type.returns_void:
-                out_typearg = function.fun_type.return_typearg
-            elif function.is_temp_variable(name):
-                # Check local variables
-                out_typearg = TypeArg(name, function.temp_var_type(name))
-                out_typearg.parent = function
+                if out_typearg.type_expr == KindType:
+                    set_trace()
+                    # TODO: *something?*
+                return out_typearg.type_expr
 
-        if out_typearg:
-            if out_typearg.type_expr == KindType:
-                # TODO: *something?*
-                pass
+        # Check if this is the "output" arg
+        if fun_type.return_typearg and fun_type.return_typearg.name == name:
+            return fun_type.return_typearg.type_expr
+
+        # Check locals
+        if self.is_temp_variable(name):
+            # Check local variables
+            return self.temp_var_type(name)
+
         return out_typearg
 
     def _resolve(self):
@@ -243,17 +267,8 @@ class FunApp(Expr):
         if func_args and type(func_args) is not list:
             func_args = [func_args]
         self.func_args = func_args
-
-    def ensure_parents(self):
-        """ Ensures that all children have the parents setup correctly.  
-        Assumes that the parent of this expression is set corrected before this is called.
-        """
-        assert self.parent is not None
-        self.func_expr.parent = self.parent
-        self.func_expr.ensure_parents()
-        for arg in self.func_args:
-            arg.parent = self.parent
-            arg.ensure_parents()
+        self.func_expr.parent = self
+        for arg in self.func_args: arg.parent = self
 
     def _equals(self, another):
         return self.func_expr.equals(another.func_expr) and \
@@ -273,7 +288,7 @@ class FunApp(Expr):
         function = self.func_expr.resolve()
         if not function:
             raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
-        while type(function) is Type and function.category == TypeCategory.ALIAS_TYPE:
+        while type(function) is Type and type.is_alias:
             assert len(function.args) == 1, "Typeref cannot have more than one child argument"
             function = function.args[0].type_expr.resolve()
 
@@ -307,53 +322,14 @@ class FunApp(Expr):
             return FunApp(function, arg_values)
         return self
 
-class TypeCategory(Enum):
-    # Named basic types
-    LITERAL_TYPE        = 0
-
-    # t1 x t2 x ... x tN
-    PRODUCT_TYPE        = 1
-
-    # t1 + t2 + ... + tN
-    # eg records, tuples
-    SUM_TYPE            = 2
-
-    # t1 -> t2 -> ... -> tN
-    FUNCTION_TYPE       = 3
-
-    # forall(t1,t2,...,tN) -> tN(t1...tN-1)
-    UNIVERSAL_TYPE      = 4
-
-    # exists(t1,t2,...,tN) -> tN(t1...tN-1)
-    EXISTENTIAL_TYPE    = 5
-
-    # \(t1,t2,...,tN) -> tN(t1...tN-1)
-    ABSTRACTION         = 6
-
-    # t1(t2...tN)
-    # Instantiation of a generic type
-    APPLICATION         = 7
-
-    # Reference to another type by name (that will be resolved later)
-    TYPEREF             = 8
-
-    # Alias type
-    ALIAS_TYPE          = 9
-
 class Type(Expr, Annotatable):
-    def __init__(self, category, fqn, type_args, parent, annotations = None, docs = ""):
+    def __init__(self, fqn, parent, annotations = None, docs = ""):
         """
         Creates a new type function.  Type functions are responsible for creating concrete type instances
         or other (curried) type functions.
 
         Params:
-            category        The type's category, eg "record", "literal" etc.  This is not the name 
-                            of the type itself but a name that indicates a class of this type.
             fqn             FQN of the type.
-            type_args       Type arguments are fields/children of a given type are themselves exprs 
-                            (whose final type must be of Type).  The meanign of the type arguments
-                            depends on the category this type is representing.  See the TypeCategory
-                            for more details.
             parent          A reference to the parent container entity of this type.
             annotations     Annotations applied to the type.
             docs            Documentation string for the type.
@@ -361,116 +337,162 @@ class Type(Expr, Annotatable):
         Annotatable.__init__(self, annotations = annotations, docs = docs)
         Expr.__init__(self, parent)
 
-        if type(category) is not TypeCategory:
-            raise errors.TLException("category must be a TypeCategory")
-
         # tag can indicate a further specialization of the type - eg "record", "enum" etc
         self.tag = None
         self.is_external = False
-        self.category = category
         self.fqn = fqn
-        self.args = TypeArgList(type_args)
 
-    def ensure_parents(self):
-        """ Ensures that all children have the parents setup correctly.  
-        Assumes that the parent of this expression is set corrected before this is called.
-        """
-        assert self.parent is not None
-        for arg in self.args:
-            arg.parent = self
-            arg.ensure_parents()
+    @property
+    def is_literal_type(self):
+        # Named basic types
+        return False
 
-    def _equals(self, another):
-        return self.fqn == another.fqn and \
-               self.category == another.category and \
-               self.parent == another.parent and \
-               self.args.equals(another.args)
+    @property
+    def is_product_type(self): return False
+
+    @property
+    def is_sum_type(self): return False
+
+    @property
+    def is_function_type(self): return False
+
+    @property
+    def is_type_app(self): return False
+
+    @property
+    def is_type_function(self): return False
+
+    @property
+    def is_typeref(self): return False
+
+    @property
+    def is_alias(self): return False
 
     @property
     def name(self):
         return self.fqn.split(".")[-1]
 
-    def _evaltype(self):
-        """ Type of a "Type" is a KindType!!! """
-        return KindType
-
-    def _resolve(self):
-        """ Default resolver for just resolving all child argument types. """
-        new_type_args = [arg.resolve() for arg in self.args]
-        if any(x != y for x,y in zip(new_type_args, self.args)):
-            return Type(self.category, self.fqn, new_type_args, self.parent, self.annotations, self.docs)
-        return self
-
-    @property
-    def return_typearg(self):
-        assert self.category is TypeCategory.FUNCTION_TYPE or self.is_type_function
-        return self.args[-1]
-
-    @property
-    def source_typeargs(self):
-        assert self.category is TypeCategory.FUNCTION_TYPE or self.is_type_function
-        return self.args[:-1]
-
-    @property
-    def returns_void(self):
-        return self.return_typearg.type_expr == VoidType
-
-    @property
-    def is_type_function(self):
-        return False
-
     def __json__(self, **kwargs):
-        out = {'category': self.category}
+        out = {}
         if self.fqn:
             out["fqn"] = self.fqn
         if kwargs.get("include_docs", False) and self.docs:
             out["docs"] = self.docs
-        if self.args:
-            out["args"] = [arg.json(**kwargs) for arg in self.args]
         return out
 
+class ContainerType(Type):
+    def __init__(self, fqn, typeargs, parent, annotations = None, docs = ""):
+        Type.__init__(self, fqn, parent, annotations, docs)
+        self.args = typeargs
+        for arg in self.args:
+            arg.parent = arg.type_expr.parent = self
+
+    def _equals(self, another):
+        return self.fqn == another.fqn and \
+               self.parent == another.parent and \
+               self.args.equals(another.args)
+
+class LiteralType(Type):
+    @property
+    def is_literal_type(self): return True
+
+class AliasType(Type):
+    def __init__(self, fqn, target_type, parent, annotations = None, docs = ""):
+        Type.__init__(self, fqn, parent, annotations, docs)
+        self.target_type = target_type
+        assert istype(self.target_type)
+
+    @property
+    def is_alias_type(self): return True
+
+class ProductType(ContainerType):
+    def __init__(self, tag, fqn, typeargs, parent, annotations = None, docs = ""):
+        ContainerType.__init__(self, fqn, typeargs, parent, annotations, docs)
+        self.tag = tag
+
+    @property
+    def is_product_type(self): return True
+
+class SumType(ContainerType):
+    def __init__(self, tag, fqn, typeargs, parent, annotations = None, docs = ""):
+        ContainerType.__init__(self, fqn, typeargs, parent, annotations, docs)
+        self.tag = tag
+
+    @property
+    def is_sum_type(self): return True
+
+class FunType(Type):
+    """ Represents function types. """
+    def __init__(self, fqn, source_typeargs, return_typearg, parent, annotations = None, docs = ""):
+        Type.__init__(self, fqn, parent, annotations, docs)
+        self.return_typearg = return_typearg
+        self.source_typeargs = source_typeargs
+        for arg in self.source_typeargs:
+            arg.parent = arg.type_expr.parent = self
+        if self.return_typearg:
+            self.return_typearg.parent = self.return_typearg.type_expr.parent = self
+
+    @property
+    def is_function_type(self): return True
+
 class TypeRef(Type):
-    def __init__(self, target_fqn, parent, annotations = None, docs = ""):
-        Type.__init__(self, TypeCategory.TYPEREF, target_fqn, None, parent, annotations = None, docs = "")
+    @property
+    def is_typeref(self): return True
 
     def _resolve(self):
         return self.resolve_name(self.fqn)
 
 class TypeFun(Type):
     def __init__(self, fqn, type_params, type_expr, parent, annotations = None, docs = ""):
-        type_args = [TypeArg(tp,KindType) for tp in type_params] + [TypeArg(None, type_expr if type_expr else KindType)]
-        Type.__init__(self, TypeCategory.ABSTRACTION, fqn, type_args, parent, annotations = None, docs = "")
+        Type.__init__(self, fqn, parent, annotations = None, docs = "")
+        assert not type_expr or istype(type_expr)
+        self.type_params = type_params
+        self.type_expr = type_expr
         self.is_external = type_expr is None
+        # Ok to set parent since if the type expr is a ref only the reference's parent set
+        # but the "real" underlying parent will have its type pointing to where ever it was
+        # created
+        if type_expr:
+            self.type_expr.parent = self
 
-    def apply(self, type_args):
+    def apply(self, typeargs):
         set_trace()
         return None
 
     @property
-    def is_type_function(self):
-        return True
+    def is_type_function(self): return True
 
     def _resolve_name(self, name, condition = None):
-        for arg in self.args:
-            if arg.name == name:
+        for param in self.type_params:
+            if param == name:
                 if condition is None or condition(arg.type_expr):
-                    return arg.type_expr
+                    return KindType
                 break
         return None
 
 class TypeApp(Type):
-    def __init__(self, type_func, type_args, parent, annotations = None, docs = ""):
-        type_args = [TypeArg(None, type_func)] + type_args
-        Type.__init__(self, TypeCategory.APPLICATION, None, type_args, parent, annotations = None, docs = "")
+    def __init__(self, typefun_expr, typeapp_args, parent, annotations = None, docs = ""):
+        Type.__init__(self, None, parent, annotations = None, docs = "")
+        if type(typefun_expr) in (str, unicode):
+            typefun_expr = make_ref(typefun_expr)
+        self.typefun_expr = typefun_expr
+        self.typeapp_args = typeapp_args
+        assert(all(istype(t) for t in typeapp_args)), "All type args in a TypeApp must be Type sub classes"
+        self.typefun_expr.parent = self
+        for arg in self.typeapp_args:
+            arg.parent = self
+
+    @property
+    def is_type_app(self): return True
 
     def _resolve(self):
         """ Resolves a type application. This will apply the type arguments to the type function. """
         # First resolve the expr to get the source function
         # Here we need to decide if the function needs to be "duplicated" for each different type
         # This is where type re-ification is important - both at buildtime and runtime
-        resolved_type_args = [arg.resolve() for arg in self.args]
-        typefun = resolved_type_args[0].type_expr
-        typefun_args = resolved_type_args[1:]
+        resolved_typeargs = [arg.resolve() for arg in self.args]
+        typefun = resolved_typeargs[0].type_expr
+        typefun_args = resolved_typeargs[1:]
         if not typefun:
             raise errors.TLException("Fun '%s' is undefined" % self.args[0])
         if not typefun.is_type_function:
@@ -493,14 +515,6 @@ class TypeArg(Expr, Annotatable):
         self.type_expr = type_expr
         self.is_optional = is_optional
         self.default_value = default_value or None
-
-    def ensure_parents(self):
-        """ Ensures that all children have the parents setup correctly.  
-        Assumes that the parent of this expression is set corrected before this is called.
-        """
-        assert self.parent is not None
-        self.type_expr.parent = self.parent
-        self.type_expr.ensure_parents()
 
     def _equals(self, another):
         return self.name == another.name and \
@@ -552,29 +566,29 @@ def validate_typearg(arg):
 
 class TypeArgList(object):
     """ A list of type args for a particular type container. """
-    def __init__(self, type_args):
-        self._type_args = []
-        for type_arg in type_args or []:
-            self.add(type_arg)
+    def __init__(self, typeargs):
+        self._typeargs = []
+        for typearg in typeargs or []:
+            self.add(typearg)
 
     def equals(self, another):
-        return len(self._type_args) == len(self._type_args) and all(x.equals(y) for x,y in izip(self._type_args, another._type_args))
+        return len(self._typeargs) == len(self._typeargs) and all(x.equals(y) for x,y in izip(self._typeargs, another._typeargs))
 
     def __getitem__(self, slice):
-        return self._type_args.__getitem__(slice)
+        return self._typeargs.__getitem__(slice)
 
-    def __iter__(self): return iter(self._type_args)
+    def __iter__(self): return iter(self._typeargs)
 
-    def __len__(self): return len(self._type_args)
+    def __len__(self): return len(self._typeargs)
 
     def __repr__(self):
-        return repr(self._type_args)
+        return repr(self._typeargs)
 
     @property
-    def count(self): return len(self._type_args)
+    def count(self): return len(self._typeargs)
 
     def index_for(self, name):
-        for i,arg in enumerate(self._type_args):
+        for i,arg in enumerate(self._typeargs):
             if arg.name == name:
                 return i
         return -1
@@ -583,7 +597,7 @@ class TypeArgList(object):
         return self.atindex(self.index_for(name))
 
     def atindex(self, index):
-        return None if index < 0 else self._type_args[index]
+        return None if index < 0 else self._typeargs[index]
 
     def contains(self, name):
         return self.index_for(name) >= 0
@@ -597,47 +611,41 @@ class TypeArgList(object):
             index = self.index_for(arg.name)
             if index >= 0:
                 raise errors.TLException("Child type by the given name '%s' already exists" % arg.name)
-        self._type_args.append(arg)
-
-def make_tagged_type(tag, category, fqn, type_args, parent = None, annotations = None, docs = ""):
-    out = Type(category, fqn, type_args = type_args, parent = parent, annotations = annotations, docs = docs)
-    out.tag = tag
-    return out
+        self._typeargs.append(arg)
 
 def make_literal_type(fqn, parent = None, annotations = None, docs = ""):
-    return make_tagged_type(None, TypeCategory.LITERAL_TYPE, fqn, type_args = None,
-                            parent = parent, annotations = annotations, docs = docs)
+    return LiteralType(fqn, parent, annotations, docs)
 
-def make_fun_type(fqn, type_args, output_arg, parent = None, annotations = None, docs = ""):
-    if output_arg is None:
-        output_arg = VoidType
-    args = type_args + [output_arg]
-    return make_tagged_type(None, TypeCategory.FUNCTION_TYPE, fqn, args,
-                            parent = parent, annotations = annotations, docs = docs)
+def make_product_type(tag, fqn, typeargs, parent = None, annotations = None, docs = ""):
+    return ProductType(tag, fqn, typeargs, parent, annotations = None, docs = "")
 
-def make_alias(fqn, type_expr, parent = None, annotations = None, docs = ""):
-    return make_tagged_type(None, TypeCategory.ALIAS_TYPE, fqn, type_args = [type_expr], 
-                            parent = parent, annotations = annotations, docs = docs)
+def make_sum_type(tag, fqn, typeargs, parent = None, annotations = None, docs = ""):
+    return SumType(tag, fqn, typeargs, parent, annotations = None, docs = "")
+
+def make_fun_type(fqn, source_typeargs, return_typearg, parent = None, annotations = None, docs = ""):
+    return FunType(fqn, source_typeargs, return_typearg, parent, annotations, docs)
+
+def make_alias(fqn, target_type, parent = None, annotations = None, docs = ""):
+    return AliasType(fqn, target_type, parent, annotations, docs)
 
 def make_type_fun(fqn, type_params, expr, parent, annotations = None, docs = ""):
-    newtype = TypeFun(fqn, type_params, expr, parent, annotations = None, docs = "")
-    if expr:
-        # if not issubclass(expr.__class__, Type): set_trace()
-        assert issubclass(expr.__class__, Type), "We dont do dependant types yet!"
-        expr.parent = newtype
-    return newtype
+    return TypeFun(fqn, type_params, expr, parent, annotations = None, docs = "")
 
 def make_ref(target_fqn, parent = None, annotations = None, docs = None):
     return TypeRef(target_fqn, parent, annotations = annotations, docs = docs)
 
-def make_type_app(type_func_expr, type_args, parent = None, annotations = None, docs = ""):
-    if type(type_func_expr) in (str, unicode):
-        type_func_expr = make_ref(type_func_expr)
-    return TypeApp(type_func_expr, type_args, parent, annotations, docs)
+def make_type_app(type_func_expr, typeargs, parent = None, annotations = None, docs = ""):
+    return TypeApp(type_func_expr, typeargs, parent, annotations, docs)
 
-def make_enum_type(fqn, parent = None, annotations = None, docs = None):
-    return make_tagged_type("enum", TypeCategory.SUM_TYPE, fqn, None,
-                            parent, annotations = annotations, docs = docs)
+def make_enum_type(fqn, symbols, parent = None, annotations = None, docs = None):
+    typeargs = []
+    for name,value,sym_annotations,sym_docs in symbols:
+        sym_fqn = ".".join([fqn, name])
+        typeargs.append(TypeArg(name, make_literal_type(sym_fqn), False, value, sym_annotations, sym_docs))
+    out = SumType("enum", fqn, typeargs, parent, annotations = annotations, docs = docs)
+    for ta in typeargs:
+        ta.type_expr.parent = out
+    return out
 
 KindType = make_literal_type("Type")
 AnyType = make_literal_type("any")
