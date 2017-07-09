@@ -366,7 +366,7 @@ class Type(Expr, Annotatable):
     def is_typeref(self): return False
 
     @property
-    def is_alias(self): return False
+    def is_alias_type(self): return False
 
     @property
     def name(self):
@@ -380,6 +380,25 @@ class Type(Expr, Annotatable):
             out["docs"] = self.docs
         return out
 
+class LiteralType(Type):
+    @property
+    def is_literal_type(self): return True
+
+    def clone(self, newparent):
+        return LiteralType(self.fqn, newparent, self.annotations, self.docs)
+
+class AliasType(Type):
+    def __init__(self, fqn, target_type, parent, annotations = None, docs = ""):
+        Type.__init__(self, fqn, parent, annotations, docs)
+        self.target_type = target_type
+        assert istype(self.target_type)
+
+    def clone(self):
+        return make_alias(self.fqn, self.target_type, self.parent, self.annotations, self.docs)
+
+    @property
+    def is_alias_type(self): return True
+
 class ContainerType(Type):
     def __init__(self, fqn, typeargs, parent, annotations = None, docs = ""):
         Type.__init__(self, fqn, parent, annotations, docs)
@@ -391,19 +410,6 @@ class ContainerType(Type):
         return self.fqn == another.fqn and \
                self.parent == another.parent and \
                self.args.equals(another.args)
-
-class LiteralType(Type):
-    @property
-    def is_literal_type(self): return True
-
-class AliasType(Type):
-    def __init__(self, fqn, target_type, parent, annotations = None, docs = ""):
-        Type.__init__(self, fqn, parent, annotations, docs)
-        self.target_type = target_type
-        assert istype(self.target_type)
-
-    @property
-    def is_alias_type(self): return True
 
 class ProductType(ContainerType):
     def __init__(self, tag, fqn, typeargs, parent, annotations = None, docs = ""):
@@ -439,6 +445,9 @@ class TypeRef(Type):
     @property
     def is_typeref(self): return True
 
+    def clone(self, newparent):
+        return make_ref(self.fqn, newparent, self.annotations, self.docs)
+
     def _resolve(self):
         return self.resolve_name(self.fqn)
 
@@ -456,8 +465,31 @@ class TypeFun(Type):
             self.type_expr.parent = self
 
     def apply(self, typeargs):
-        set_trace()
-        return None
+        assert self.type_expr is not None
+        bindings = dict(zip(self.type_params, typeargs))
+        return self._reduce_type_with_bindings(self.parent, self.type_expr, bindings)
+
+    def _reduce_type_with_bindings(self, parent, type_expr, bindings):
+        if type_expr.is_literal_type:
+            return type_expr
+        elif type_expr.is_typeref:
+            if type_expr.fqn in bindings:
+                return bindings[type_expr.fqn].clone(parent)
+            return type_expr.clone(parent)
+        elif type_expr.is_alias_type:
+            assert False
+        elif type_expr.is_product_type or type_expr.is_sum_type:
+            maker = make_product_type if type_expr.is_product_type else make_sum_type
+            typeargs = [TypeArg(ta.name, self._reduce_type_with_bindings(None, ta.type_expr, bindings),
+                                ta.is_optional, ta.default_value, ta.annotations, ta.docs) for ta in type_expr.args]
+            return maker(type_expr.tag, type_expr.fqn, typeargs, parent, type_expr.annotations, type_expr.docs)
+        elif type_expr.is_type_app:
+            new_typefun = self._reduce_type_with_bindings(None, type_expr.typefun_expr, bindings)
+            new_typeargs = [self._reduce_type_with_bindings(None, arg, bindings) for arg in type_expr.typeapp_args]
+            return make_type_app(new_typefun, new_typeargs, parent, type_expr.annotations, type_expr.docs)
+        else:
+            set_trace()
+        pass
 
     @property
     def is_type_function(self): return True
@@ -490,21 +522,25 @@ class TypeApp(Type):
         # First resolve the expr to get the source function
         # Here we need to decide if the function needs to be "duplicated" for each different type
         # This is where type re-ification is important - both at buildtime and runtime
-        resolved_typeargs = [arg.resolve() for arg in self.args]
-        typefun = resolved_typeargs[0].type_expr
-        typefun_args = resolved_typeargs[1:]
+        typefun = self.typefun_expr.resolve()
+        typeargs = [arg.resolve() for arg in self.typeapp_args]
         if not typefun:
             raise errors.TLException("Fun '%s' is undefined" % self.args[0])
         if not typefun.is_type_function:
             raise errors.TLException("Fun '%s' is not a function" % typefun)
 
         # Wont do currying for now
-        if len(typefun_args) != len(typefun.source_typeargs):
+        if len(typeargs) != len(typefun.type_params):
             raise errors.TLException("TypeFun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
-                                            (typefun.name, len(typefun.source_typeargs), len(self.typefun_args)))
+                                            (typefun.name, len(typefun.source_typeargs), len(self.typeapp_args)))
 
         # TODO - check arg types match
-        return typefun.apply(typefun_args)
+        if typefun.is_external:
+            # Then typefun has no expression where we can do beta reductions so just
+            # return a new typeapp with the arguments instead
+            return self
+
+        return typefun.apply(typeargs)
 
 class TypeArg(Expr, Annotatable):
     """ A type argument is a child of a given type.  Akin to a member/field of a type.  """
@@ -640,11 +676,11 @@ def make_type_app(type_func_expr, typeargs, parent = None, annotations = None, d
 def make_enum_type(fqn, symbols, parent = None, annotations = None, docs = None):
     typeargs = []
     for name,value,sym_annotations,sym_docs in symbols:
-        sym_fqn = ".".join([fqn, name])
-        typeargs.append(TypeArg(name, make_literal_type(sym_fqn), False, value, sym_annotations, sym_docs))
+        typeargs.append(TypeArg(name, VoidType, False, value, sym_annotations, sym_docs))
     out = SumType("enum", fqn, typeargs, parent, annotations = annotations, docs = docs)
     for ta in typeargs:
-        ta.type_expr.parent = out
+        ta.type_expr = out
+        # ta.type_expr.parent = out
     return out
 
 KindType = make_literal_type("Type")
