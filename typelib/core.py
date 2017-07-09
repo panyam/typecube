@@ -12,7 +12,7 @@ class NameResolver(object):
         """ Tries to resolve a name in this expression. """
         value = self._resolve_name(name, condition)
         if value and (condition is None or condition(value)):
-            return value, self
+            return value
         if self.parent:     # Try the parent expression
             return self.parent.resolve_name(name, condition)
         raise errors.TLException("Unable to resolve name: %s" % name)
@@ -21,10 +21,21 @@ class Expr(NameResolver):
     """
     Parent of all exprs.  All exprs must have a value.  Exprs only appear in functions.
     """
-    def __init__(self, parent):
+    def __init__(self, parent = None):
         self.parent = parent
 
     #########
+    def ensure_parents(self):
+        """ Ensures that all children have the parents setup correctly.  
+        Assumes that the parent of this expression is set corrected before this is called.
+        """
+        assert self.parent is not None
+        pass
+
+    def resolve_name(self, name, condition = None):
+        assert self.parent is not None, "Parent of %s is None" % type(self)
+        return NameResolver.resolve_name(self, name, condition)
+
     def _resolve_name(self, name, condition = None):
         return None
 
@@ -34,9 +45,9 @@ class Expr(NameResolver):
     def _equals(self, another):
         assert False, "Not Implemented"
 
-    def evaltype(self, resolver_stack):
+    def evaltype(self):
         # Do caching of results here based on resolver!
-        return self._evaltype(resolver_stack)
+        return self._evaltype()
 
     def _evaltype(self):
         set_trace()
@@ -47,7 +58,7 @@ class Expr(NameResolver):
         # Do caching of results here based on resolver!
         return self._resolve()
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """ This method resolves a type expr to a type object. 
         The resolver is used to get bindings for names used in this expr.
         
@@ -71,27 +82,27 @@ class Var(Expr):
     def __repr__(self):
         return "<VarExp - ID: 0x%x, Value: %s>" % (id(self), str(self.field_path))
 
-    def _evaltype(self, resolver_stack):
-        resolved = self.resolve(resolver_stack)
+    def _evaltype(self):
+        resolved = self.resolve()
         if type(resolved) is Type:
             return resolved
         if type(resolved) is Fun:
-            return resolved.fun_type.resolve(resolver_stack)
+            return resolved.fun_type.resolve()
         if issubclass(resolved.__class__, FunApp):
-            func = resolved.func_expr.resolve(resolver_stack)
-            fun_type = func.fun_type.resolve(resolver_stack)
+            func = resolved.func_expr.resolve()
+            fun_type = func.fun_type.resolve()
             return fun_type.output_typearg
         if issubclass(resolved.__class__, Expr):
-            return resolved.evaltype(resolver_stack)
+            return resolved.evaltype()
         set_trace()
         assert False, "Unknown resolved value type"
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """
         Returns the actual entry pointed to by the "first" part of the field path.
         """
         first = self.field_path.get(0)
-        target = resolver_stack.resolve_name(first)
+        target = self.resolve_name(first)
         if target is None:
             assert target is not None, "Could not resolve '%s'" % first
         return target
@@ -102,13 +113,22 @@ class Fun(Expr, Annotatable):
     specific backends.
     """
     def __init__(self, fqn, fun_type, expr, parent, annotations = None, docs = ""):
-        Expr.__init__(self)
+        Expr.__init__(self, parent)
         Annotatable.__init__(self, annotations, docs)
-        self.parent = parent
         self.fqn = fqn
         self.fun_type = fun_type
         self.expr = expr
         self.temp_variables = {}
+
+    def ensure_parents(self):
+        """ Ensures that all children have the parents setup correctly.  
+        Assumes that the parent of this expression is set corrected before this is called.
+        """
+        self.fun_type.parent = self.parent
+        self.fun_type.ensure_parents()
+        if self.expr:
+            self.expr.parent = self
+            self.expr.ensure_parents()
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
@@ -161,6 +181,7 @@ class Fun(Expr, Annotatable):
             elif function.is_temp_variable(name):
                 # Check local variables
                 out_typearg = TypeArg(name, function.temp_var_type(name))
+                out_typearg.parent = function
 
         if out_typearg:
             if out_typearg.type_expr == KindType:
@@ -168,25 +189,22 @@ class Fun(Expr, Annotatable):
                 pass
         return out_typearg
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """
         The main resolver method.  This should take care of the following:
 
             1. Ensure field paths are correct
             2. All exprs have their evaluated types set
         """
-        if resolver_stack == None:
-            resolver_stack = ResolverStack(self.parent, None)
-        resolver_stack = resolver_stack.push(self)
-        new_fun_type = self.fun_type.resolve(resolver_stack)
-        resolved_expr = None if not self.expr else self.expr.resolve(resolver_stack)
+        new_fun_type = self.fun_type.resolve()
+        resolved_expr = None if not self.expr else self.expr.resolve()
         if new_fun_type == self.fun_type and resolved_expr == self.expr:
             return self
         out = Fun(self.name, new_fun_type, resolved_expr, self.parent, self.annotations, self.docs)
         return out
 
-    def _evaltype(self, resolver_stack):
-        return self.resolve(resolver_stack).fun_type
+    def _evaltype(self):
+        return self.resolve().fun_type
 
     def __repr__(self):
         return "<%s(0x%x) %s>" % (self.__class__.__name__, id(self), self.fqn)
@@ -226,27 +244,38 @@ class FunApp(Expr):
             func_args = [func_args]
         self.func_args = func_args
 
+    def ensure_parents(self):
+        """ Ensures that all children have the parents setup correctly.  
+        Assumes that the parent of this expression is set corrected before this is called.
+        """
+        assert self.parent is not None
+        self.func_expr.parent = self.parent
+        self.func_expr.ensure_parents()
+        for arg in self.func_args:
+            arg.parent = self.parent
+            arg.ensure_parents()
+
     def _equals(self, another):
         return self.func_expr.equals(another.func_expr) and \
                 self.func_args.equals(another.func_args)
 
-    def _evaltype(self, resolver_stack):
-        resolved = self.resolve(resolver_stack)
+    def _evaltype(self):
+        resolved = self.resolve()
         if issubclass(resolved.__class__, App):
-            resolved.func_expr.evaltype(resolver_stack)
+            resolved.func_expr.evaltype()
         elif isinstance(resolved, Type):
             return resolved
         else:
             set_trace()
             assert False, "What now?"
 
-    def resolve_function(self, resolver_stack):
-        function = self.func_expr.resolve(resolver_stack)
+    def resolve_function(self):
+        function = self.func_expr.resolve()
         if not function:
             raise errors.TLException("Fun '%s' is undefined" % (self.func_expr))
         while type(function) is Type and function.category == TypeCategory.ALIAS_TYPE:
             assert len(function.args) == 1, "Typeref cannot have more than one child argument"
-            function = function.args[0].type_expr.resolve(function.default_resolver_stack)
+            function = function.args[0].type_expr.resolve()
 
         if type(function) is not Fun:
             set_trace()
@@ -256,7 +285,7 @@ class FunApp(Expr):
     def __repr__(self):
         return "<FunApp(0x%x) Expr = %s, Args = (%s)>" % (id(self), repr(self.func_expr), ", ".join(map(repr, self.func_args)))
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """
         Processes an exprs and resolves name bindings and creating new local vars 
         in the process if required.
@@ -264,8 +293,8 @@ class FunApp(Expr):
         # First resolve the expr to get the source function
         # Here we need to decide if the function needs to be "duplicated" for each different type
         # This is where type re-ification is important - both at buildtime and runtime
-        function = self.resolve_function(resolver_stack)
-        arg_values = [arg.resolve(resolver_stack) for arg in self.func_args]
+        function = self.resolve_function()
+        arg_values = [arg.resolve() for arg in self.func_args]
 
         # Wont do currying for now
         if len(arg_values) != len(function.source_typeargs):
@@ -330,7 +359,7 @@ class Type(Expr, Annotatable):
             docs            Documentation string for the type.
         """
         Annotatable.__init__(self, annotations = annotations, docs = docs)
-        Expr.__init__(self)
+        Expr.__init__(self, parent)
 
         if type(category) is not TypeCategory:
             raise errors.TLException("category must be a TypeCategory")
@@ -339,9 +368,17 @@ class Type(Expr, Annotatable):
         self.tag = None
         self.is_external = False
         self.category = category
-        self.parent = parent
         self.fqn = fqn
         self.args = TypeArgList(type_args)
+
+    def ensure_parents(self):
+        """ Ensures that all children have the parents setup correctly.  
+        Assumes that the parent of this expression is set corrected before this is called.
+        """
+        assert self.parent is not None
+        for arg in self.args:
+            arg.parent = self
+            arg.ensure_parents()
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
@@ -353,13 +390,13 @@ class Type(Expr, Annotatable):
     def name(self):
         return self.fqn.split(".")[-1]
 
-    def _evaltype(self, resolver_stack):
+    def _evaltype(self):
         """ Type of a "Type" is a KindType!!! """
         return KindType
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """ Default resolver for just resolving all child argument types. """
-        new_type_args = [arg.resolve(resolver_stack) for arg in self.args]
+        new_type_args = [arg.resolve() for arg in self.args]
         if any(x != y for x,y in zip(new_type_args, self.args)):
             return Type(self.category, self.fqn, new_type_args, self.parent, self.annotations, self.docs)
         return self
@@ -396,8 +433,8 @@ class TypeRef(Type):
     def __init__(self, target_fqn, parent, annotations = None, docs = ""):
         Type.__init__(self, TypeCategory.TYPEREF, target_fqn, None, parent, annotations = None, docs = "")
 
-    def _resolve(self, resolver_stack):
-        return resolver_stack.resolve_name(self.fqn)
+    def _resolve(self):
+        return self.resolve_name(self.fqn)
 
 class TypeFun(Type):
     def __init__(self, fqn, type_params, type_expr, parent, annotations = None, docs = ""):
@@ -405,11 +442,15 @@ class TypeFun(Type):
         Type.__init__(self, TypeCategory.ABSTRACTION, fqn, type_args, parent, annotations = None, docs = "")
         self.is_external = type_expr is None
 
+    def apply(self, type_args):
+        set_trace()
+        return None
+
     @property
     def is_type_function(self):
         return True
 
-    def resolve_name(self, name, condition = None):
+    def _resolve_name(self, name, condition = None):
         for arg in self.args:
             if arg.name == name:
                 if condition is None or condition(arg.type_expr):
@@ -422,41 +463,44 @@ class TypeApp(Type):
         type_args = [TypeArg(None, type_func)] + type_args
         Type.__init__(self, TypeCategory.APPLICATION, None, type_args, parent, annotations = None, docs = "")
 
-    def _typeapp_resolver(self, resolver_stack):
-        """ Resolves a type application. """
-        new_type_args = [arg.resolve(resolver_stack) for arg in self.args]
-
-        # Ensure that the first value is a type function
-        assert new_type_args[0].type_expr.is_type_function
-        new_output_arg = None if not self.output_arg else self.output_arg.resolve(resolver_stack)
-        if new_output_arg != self.output_arg or any(x != y for x,y in zip(new_type_args, self.args)):
-            return Type(self.category, self.fqn, new_type_args, new_output_arg, self.parent, self.annotations, self.docs)
-        return self
-
-    def resolve_typefunction(self, resolver_stack):
-        func_expr = self.args[0]
-        func_args = self.args[1:]
-
-        typefun = func_expr.resolve(resolver_stack)
+    def _resolve(self):
+        """ Resolves a type application. This will apply the type arguments to the type function. """
+        # First resolve the expr to get the source function
+        # Here we need to decide if the function needs to be "duplicated" for each different type
+        # This is where type re-ification is important - both at buildtime and runtime
+        resolved_type_args = [arg.resolve() for arg in self.args]
+        typefun = resolved_type_args[0].type_expr
+        typefun_args = resolved_type_args[1:]
         if not typefun:
-            raise errors.TLException("Fun '%s' is undefined" % func_expr)
-        while typefun.category == TypeCategory.ALIAS_TYPE:
-            assert len(typefun.args) == 1, "Typeref cannot have more than one child argument"
-            typefun = typefun.args[0].type_expr.resolve(typefun.default_resolver_stack)
-
+            raise errors.TLException("Fun '%s' is undefined" % self.args[0])
         if not typefun.is_type_function:
-            raise errors.TLException("Fun '%s' is not a function" % (self.func_expr))
-        return typefun
+            raise errors.TLException("Fun '%s' is not a function" % typefun)
+
+        # Wont do currying for now
+        if len(typefun_args) != len(typefun.source_typeargs):
+            raise errors.TLException("TypeFun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
+                                            (typefun.name, len(typefun.source_typeargs), len(self.typefun_args)))
+
+        # TODO - check arg types match
+        return typefun.apply(typefun_args)
 
 class TypeArg(Expr, Annotatable):
     """ A type argument is a child of a given type.  Akin to a member/field of a type.  """
     def __init__(self, name, type_expr, is_optional = False, default_value = None, annotations = None, docs = ""):
-        Expr.__init__(self)
+        Expr.__init__(self, None)
         Annotatable.__init__(self, annotations, docs)
         self.name = name
         self.type_expr = type_expr
         self.is_optional = is_optional
         self.default_value = default_value or None
+
+    def ensure_parents(self):
+        """ Ensures that all children have the parents setup correctly.  
+        Assumes that the parent of this expression is set corrected before this is called.
+        """
+        assert self.parent is not None
+        self.type_expr.parent = self.parent
+        self.type_expr.ensure_parents()
 
     def _equals(self, another):
         return self.name == another.name and \
@@ -470,21 +514,21 @@ class TypeArg(Expr, Annotatable):
             out["name"] = self.name
         return out
 
-    def _evaltype(self, resolver_stack):
+    def _evaltype(self):
         """ Type of a "Type" is a KindType!!! """
-        resolved = self.resolve(resolver_stack)
-        return resolved.type_expr.resolve(resolver_stack)
+        resolved = self.resolve()
+        return resolved.type_expr.resolve()
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         out = self
         if self.type_expr is None:
             return self
-        new_expr = self.type_expr.resolve(resolver_stack)
+        new_expr = self.type_expr.resolve()
         if new_expr != self.type_expr:
             out =  TypeArg(self.name, new_expr, self.is_optional, self.docs, annotations = self.annotations, docs = self.docs)
         return out
 
-    def unwrap_with_field_path(self, full_field_path, resolver_stack):
+    def unwrap_with_field_path(self, full_field_path):
         starting_var, field_path = full_field_path.pop()
         curr_typearg = self
         curr_path = curr_field_name = starting_var
@@ -492,7 +536,7 @@ class TypeArg(Expr, Annotatable):
         while field_path.length > 0:
             next_field_name, tail_path = field_path.pop()
             next_path = curr_path + "/" + next_field_name
-            next_typearg = curr_typearg.type_expr.resolve(resolver_stack).args.withname(next_field_name)
+            next_typearg = curr_typearg.type_expr.resolve().args.withname(next_field_name)
             curr_field_name, curr_path, field_path = next_field_name, next_path, tail_path
             yield curr_field_name, curr_path, curr_typearg
 

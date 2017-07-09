@@ -24,12 +24,12 @@ class NewExpr(Expr):
         self.objtype = objtype
         self.arg_values = arg_values or {}
 
-    def _evaltype(self, resolver_stack):
-        return self.objtype.resolve(resolver_stack)
+    def _evaltype(self):
+        return self.objtype.resolve()
 
-    def _resolve(self, resolver_stack):
-        resolved_objtype = self.objtype.resolve(resolver_stack)
-        resolved_args = {key: value.resolve(resolver_stack) for key,value in self.arg_values.iteritems()}
+    def _resolve(self):
+        resolved_objtype = self.objtype.resolve()
+        resolved_args = {key: value.resolve() for key,value in self.arg_values.iteritems()}
         return self
 
 class Assignment(Expr):
@@ -42,11 +42,11 @@ class Assignment(Expr):
         return self.target_variable.equals(another.target_variable) and \
                 self.expr.equals(another.expr)
 
-    def _evaltype(self, resolver_stack):
-        resolved_expr = self.expr.resolve(resolver_stack)
-        return resolved_expr.evaltype(resolver_stack)
+    def _evaltype(self):
+        resolved_expr = self.expr.resolve()
+        return resolved_expr.evaltype()
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """
         Processes an exprs and resolves name bindings and creating new local vars 
         in the process if required.
@@ -54,12 +54,12 @@ class Assignment(Expr):
         # Resolve the target variable's binding.  This does'nt necessarily have
         # to evaluate types.
         # This will help us with type inference going backwards
-        resolved_var = self.target_variable.resolve(resolver_stack)
+        resolved_var = self.target_variable.resolve()
 
         # Resolve all types in child exprs.  
         # Apart from just evaluating all child exprs, also make sure
         # Resolve field paths that should come from source type
-        resolved_expr = self.expr.resolve(resolver_stack)
+        resolved_expr = self.expr.resolve()
         return self
 
 class Literal(Expr):
@@ -74,7 +74,7 @@ class Literal(Expr):
     def _equals(self, another):
         return self.value == another.value and self.value_type.equals(another.value_type)
 
-    def _evaltype(self, resolver_stack):
+    def _evaltype(self):
         return self.value_type
 
     def resolve(self, resolver):
@@ -101,12 +101,12 @@ class ExprList(Expr):
         else:
             self.add(another)
 
-    def _evaltype(self, resolver_stack):
-        resolved = self.resolve(resolver_stack)
-        return resolved.children[-1].evaltype(resolver_stack)
+    def _evaltype(self):
+        resolved = self.resolve()
+        return resolved.children[-1].evaltype()
 
-    def _resolve(self, resolver_stack):
-        resolved_exprs = [expr.resolve(resolver_stack) for expr in self.children]
+    def _resolve(self):
+        resolved_exprs = [expr.resolve() for expr in self.children]
         if any(x != y for x,y in zip(self.children, resolved_exprs)):
             return ExprList(resolved_exprs)
         return self
@@ -118,10 +118,10 @@ class DictExpr(Expr):
         self.values = values
         assert len(keys) == len(values)
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         for key,value in izip(self.keys, self.values):
-            key.resolve(resolver_stack)
-            value.resolve(resolver_stack)
+            key.resolve()
+            value.resolve()
 
         # TODO - Unify the types of child exprs and find the tightest type here Damn It!!!
         return self
@@ -131,16 +131,16 @@ class ListExpr(Expr):
         super(ListExpr, self).__init__()
         self.values = values
 
-    def _evaltype(self, resolver_stack):
+    def _evaltype(self):
         # TODO - Unify the types of child exprs and find the tightest type here Damn It!!!
         return ListType.apply(tlcore.AnyType)
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """
         Processes an exprs and resolves name bindings and creating new local vars 
         in the process if required.
         """
-        resolved_exprs = [expr.resolve(resolver_stack) for expr in self.values]
+        resolved_exprs = [expr.resolve() for expr in self.values]
         if any(x != y for x,y in zip(self.values, resolved_exprs)):
             return ListExpr(resolved_exprs)
         return self
@@ -150,16 +150,16 @@ class TupleExpr(Expr):
         super(TupleExpr, self).__init__()
         self.values = values or []
 
-    def _evaltype(self, resolver_stack):
+    def _evaltype(self):
         # TODO - Unify the types of child exprs and find the tightest type here Damn It!!!
         return ListType.apply(tlcore.AnyType)
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """
         Processes an exprs and resolves name bindings and creating new local vars 
         in the process if required.
         """
-        resolved_exprs = [expr.resolve(resolver_stack) for expr in self.values]
+        resolved_exprs = [expr.resolve() for expr in self.values]
         if any(x != y for x,y in zip(self.values, resolved_exprs)):
             return TupleExpr(resolved_exprs)
         return self
@@ -177,7 +177,7 @@ class IfExpr(Expr):
     def set_evaluated_typeexpr(self, vartype):
         assert False, "cannot set evaluated type of an If expr (yet)"
 
-    def _resolve(self, resolver_stack):
+    def _resolve(self):
         """ Resolves bindings and types in all child exprs. """
         ipdb.set_trace()
         assert self._evaluated_typeexpr == None, "Type has already been resolved, should not have been called twice."
