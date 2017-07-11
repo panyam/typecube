@@ -184,7 +184,7 @@ class Fun(Expr, Annotatable):
         # Check source types
         out_typearg = None
         fun_type = self.fun_type
-        if fun_type.is_type_function:
+        if fun_type.is_type_fun:
             # Since this is a type function, also check parameters
             for param in fun_type.type_params:
                 if param == name:
@@ -253,8 +253,10 @@ class Fun(Expr, Annotatable):
 
     def register_temp_var(self, varname, vartype = None):
         assert type(varname) in (str, unicode)
-        if varname in (x.name for x in self.fun_type.args):
+        if varname in (x.name for x in self.fun_type.source_typeargs):
             raise TLException("Duplicate temporary variable '%s'.  Same as function arguments." % varname)
+        elif self.fun_type.return_typearg and varname == self.fun_type.return_typearg.name:
+            raise TLException("Duplicate temporary variable '%s'.  Same as function return argument name." % varname)
         elif self.is_temp_variable(varname) and self.temp_variables[varname] is not None:
             raise TLException("Duplicate temporary variable declared: '%s'" % varname)
         self.temp_variables[varname] = vartype
@@ -360,7 +362,7 @@ class Type(Expr, Annotatable):
     def is_type_app(self): return False
 
     @property
-    def is_type_function(self): return False
+    def is_type_fun(self): return False
 
     @property
     def is_typeref(self): return False
@@ -492,7 +494,7 @@ class TypeFun(Type):
         pass
 
     @property
-    def is_type_function(self): return True
+    def is_type_fun(self): return True
 
     def _resolve_name(self, name, condition = None):
         for param in self.type_params:
@@ -526,7 +528,7 @@ class TypeApp(Type):
         typeargs = [arg.resolve() for arg in self.typeapp_args]
         if not typefun:
             raise errors.TLException("Fun '%s' is undefined" % self.args[0])
-        if not typefun.is_type_function:
+        if not typefun.is_type_fun:
             raise errors.TLException("Fun '%s' is not a function" % typefun)
 
         # Wont do currying for now
