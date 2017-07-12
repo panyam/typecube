@@ -1,10 +1,10 @@
 
 import ipdb
-from typelib import core as tlcore
-from typelib.core import Expr
-from typelib.annotations import Annotatable
-from typelib import unifier as tlunifier
-from typelib.utils import FieldPath
+from typecube import core as tlcore
+from typecube.core import Expr
+from typecube.annotations import Annotatable
+from typecube import unifier as tlunifier
+from typecube.utils import FieldPath
 
 BooleanType = tlcore.make_literal_type("boolean")
 ByteType = tlcore.make_literal_type("byte")

@@ -17,7 +17,7 @@ if "install" in sys.argv:
         # catch Debian's custom user site-packages directory.
         lib_paths.append(get_python_lib(prefix="/usr/local"))
     for lib_path in lib_paths:
-        existing_path = os.path.abspath(os.path.join(lib_path, "typelib"))
+        existing_path = os.path.abspath(os.path.join(lib_path, "typecube"))
         if os.path.exists(existing_path):
             # We note the need for the warning here, but present it after the
             # command is run, so it's more likely to be seen.
@@ -25,25 +25,25 @@ if "install" in sys.argv:
             break
 
 
-# Any packages inside the typelib source folder we dont want in the packages
+# Any packages inside the typecube source folder we dont want in the packages
 EXCLUDE_FROM_PACKAGES = [ ]
 
 def get_version():
-    with open('typelib/__init__.py', 'rb') as f:
+    with open('typecube/__init__.py', 'rb') as f:
         _version_re = re.compile(r'__version__\s+=\s+(.*)')
         return str(ast.literal_eval(_version_re.search(f.read().decode('utf-8')).group(1)))
 
 def get_description():
     return open("README.rst").read()
 
-setup(name='typelib',
+setup(name='typecube',
       version=get_version(),
       author='Sriram Panyam',
       author_email='sri.panyam@gmail.com',
       requires = ["enum34", "ipdb", "wheel", "PyYaml" ],
       extras_require={'docs': ['Sphinx>=1.1']},
       keywords=['languages', 'type system', 'types'],
-      url='https://github.com/panyam/typelib',
+      url='https://github.com/panyam/typecube',
       long_description=get_description(),
     description=("Utilities and library to model types and type systems"),
     zip_safe = False,
@@ -77,15 +77,15 @@ if overlay_warning:
 WARNING!
 ========
 
-You have just installed typelib over top of an existing
+You have just installed typecube over top of an existing
 installation, without removing it first. Because of this,
 your install may now include extraneous files from a
 previous version that have since been removed from
-typelib . This is known to cause a variety of problems. You
+typecube . This is known to cause a variety of problems. You
 should manually remove the
 
 %(existing_path)s
 
-directory and re-install typelib.
+directory and re-install typecube.
 
 """ % {"existing_path": existing_path})

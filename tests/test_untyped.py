@@ -1,5 +1,5 @@
 
-from typelib.untyped import *
+from typecube.untyped import *
 
 def test_var():
     print "Var(x) = ", str(Var("x"))

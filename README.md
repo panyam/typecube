@@ -1,2 +1,2 @@
-# typelib
-A few utilities for types and type systems.
+# typecube
+A type system library and toolchain for python.

@@ -1,5 +1,5 @@
 
-from typelib import core as tlcore
+from typecube import core as tccore
 
 def test_sample():
     assert True

@@ -1,5 +1,5 @@
 import ipdb
-from typelib import errors
+from typecube import errors
 
 class Resolver(object):
     def resolve_name(self, name, condition = None): return None

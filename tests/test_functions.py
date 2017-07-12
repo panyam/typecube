@@ -1,8 +1,8 @@
 
 from ipdb import set_trace
-from typelib.core import Fun, TypeArg, Type, Expr, Var, App, TypeApp, FunApp, make_fun_type
-from typelib.ext import IntType, StringType, Literal
-from typelib.resolvers import Resolver, MapResolver, ResolverStack
+from typecube.core import Fun, TypeArg, Type, Expr, Var, App, TypeApp, FunApp, make_fun_type
+from typecube.ext import IntType, StringType, Literal
+from typecube.resolvers import Resolver, MapResolver, ResolverStack
 
 def funtype(*names_and_types):
     output_name, output_type = names_and_types[-2:]

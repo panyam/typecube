@@ -1,6 +1,6 @@
 #!/bin/sh
 
-rm -Rf build dist typelib.egg-info
+rm -Rf build dist typecube.egg-info
 python setup.py sdist
 python setup.py bdist_wheel --universal
-rm -Rf typelib.egg-info
+rm -Rf typecube.egg-info
