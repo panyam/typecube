@@ -32,11 +32,17 @@ class Expr(NameResolver):
 
     @parent.setter
     def parent(self, value):
-        if self._parent is not None and value != self._parent:
-            set_trace()
+        self.set_parent(value)
+
+    def set_parent(self, value):
+        self.validate_parent(value)
         oldvalue = self._parent
         self._parent = value
         self.parent_changed(oldvalue)
+
+    def validate_parent(self, value):
+        if self._parent is not None and value != self._parent:
+            set_trace()
 
     def parent_changed(self, oldvalue):
         pass
@@ -386,8 +392,10 @@ class LiteralType(Type):
     @property
     def is_literal_type(self): return True
 
-    def clone(self, newparent):
+    def deepcopy(self, newparent):
         return LiteralType(self.fqn, newparent, self.annotations, self.docs)
+
+    # def validate_parent(self, value): pass
 
 class AliasType(Type):
     def __init__(self, fqn, target_type, parent, annotations = None, docs = ""):
@@ -395,8 +403,8 @@ class AliasType(Type):
         self.target_type = target_type
         assert istype(self.target_type)
 
-    def clone(self):
-        return make_alias(self.fqn, self.target_type, self.parent, self.annotations, self.docs)
+    def deepcopy(self, newparent):
+        return make_alias(self.fqn, self.target_type, newparent, self.annotations, self.docs)
 
     @property
     def is_alias_type(self): return True
@@ -406,7 +414,7 @@ class ContainerType(Type):
         Type.__init__(self, fqn, parent, annotations, docs)
         self.args = typeargs
         for arg in self.args:
-            arg.parent = arg.type_expr.parent = self
+            arg.parent = self
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
@@ -421,6 +429,9 @@ class ProductType(ContainerType):
     @property
     def is_product_type(self): return True
 
+    def deepcopy(self, newparent):
+        return ProductType(self.tag, self.fqn, [ta.deepcopy(None) for ta in self.args], newparent, self.annotations, self.docs)
+
 class SumType(ContainerType):
     def __init__(self, tag, fqn, typeargs, parent, annotations = None, docs = ""):
         ContainerType.__init__(self, fqn, typeargs, parent, annotations, docs)
@@ -429,6 +440,9 @@ class SumType(ContainerType):
     @property
     def is_sum_type(self): return True
 
+    def deepcopy(self, newparent):
+        return SumType(self.tag, self.fqn, [ta.deepcopy(None) for ta in self.args], newparent, self.annotations, self.docs)
+
 class FunType(Type):
     """ Represents function types. """
     def __init__(self, fqn, source_typeargs, return_typearg, parent, annotations = None, docs = ""):
@@ -436,9 +450,9 @@ class FunType(Type):
         self.return_typearg = return_typearg
         self.source_typeargs = source_typeargs
         for arg in self.source_typeargs:
-            arg.parent = arg.type_expr.parent = self
+            arg.parent = self
         if self.return_typearg:
-            self.return_typearg.parent = self.return_typearg.type_expr.parent = self
+            self.return_typearg.parent = self
 
     @property
     def is_function_type(self): return True
@@ -447,7 +461,14 @@ class TypeRef(Type):
     @property
     def is_typeref(self): return True
 
-    def clone(self, newparent):
+    @property
+    def final_type(self):
+        curr = self
+        while curr and curr.is_typeref:
+            curr = curr.resolve()
+        return curr
+
+    def deepcopy(self, newparent):
         return make_ref(self.fqn, newparent, self.annotations, self.docs)
 
     def _resolve(self):
@@ -476,8 +497,8 @@ class TypeFun(Type):
             return type_expr
         elif type_expr.is_typeref:
             if type_expr.fqn in bindings:
-                return bindings[type_expr.fqn].clone(parent)
-            return type_expr.clone(parent)
+                return bindings[type_expr.fqn].deepcopy(parent)
+            return type_expr.deepcopy(parent)
         elif type_expr.is_alias_type:
             assert False
         elif type_expr.is_product_type or type_expr.is_sum_type:
@@ -550,9 +571,13 @@ class TypeArg(Expr, Annotatable):
         Expr.__init__(self, None)
         Annotatable.__init__(self, annotations, docs)
         self.name = name
-        self.type_expr = type_expr
         self.is_optional = is_optional
         self.default_value = default_value or None
+        self.type_expr = type_expr
+        self.type_expr.parent = self
+
+    def deepcopy(self, newparent):
+        return TypeArg(self.name, self.type_expr.deepcopy(newparent), self.is_optional, self.default_value, self.annotations, self.docs)
 
     def _equals(self, another):
         return self.name == another.name and \

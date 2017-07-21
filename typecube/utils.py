@@ -77,7 +77,7 @@ def field_or_fqn(input):
         output = input.fqn
     return output
 
-def normalize_name_and_ns2(name, namespace, ensure_namespaces_are_equal = True):
+def normalize_name_and_ns(name, namespace, ensure_namespaces_are_equal = True):
     name,namespace = (name or "").strip(), (namespace or "").strip()
     comps = name.split(".")
     if len(comps) > 1:
