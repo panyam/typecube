@@ -23,6 +23,7 @@ class NewExpr(Expr):
     def __init__(self, objtype, **arg_values):
         self.objtype = objtype
         self.arg_values = arg_values or {}
+        for expr in arg_values.iteritems(): expr.parent = self
 
     def _evaltype(self):
         return self.objtype.resolve()
@@ -37,6 +38,8 @@ class Assignment(Expr):
         Expr.__init__(self)
         self.target_variable = target_variable
         self.expr = expr
+        self.target_variable.parent = self
+        self.expr.parent = self
 
     def _equals(self, another):
         return self.target_variable.equals(another.target_variable) and \
@@ -88,16 +91,19 @@ class ExprList(Expr):
     def __init__(self, children = None):
         Expr.__init__(self)
         self.children = children or []
+        for expr in self.children: expr.parent = self
 
     def add(self, expr):
         if not issubclass(expr.__class__, Expr):
             ipdb.set_trace()
             assert issubclass(expr.__class__, Expr), "Cannot add non Expr instances to an ExprList"
         self.children.append(expr)
+        expr.parent = self
 
     def extend(self, another):
         if type(another) is ExprList:
             self.children.extend(another.children)
+            for expr in children: expr.parent = self
         else:
             self.add(another)
 
@@ -116,6 +122,8 @@ class DictExpr(Expr):
         super(DictExpr, self).__init__()
         self.keys = keys
         self.values = values
+        for expr in keys: expr.parent = self
+        for expr in values: expr.parent = self
         assert len(keys) == len(values)
 
     def _resolve(self):
@@ -130,6 +138,7 @@ class ListExpr(Expr):
     def __init__(self, values):
         super(ListExpr, self).__init__()
         self.values = values
+        for expr in values: expr.parent = self
 
     def _evaltype(self):
         # TODO - Unify the types of child exprs and find the tightest type here Damn It!!!
@@ -149,6 +158,7 @@ class TupleExpr(Expr):
     def __init__(self, values):
         super(TupleExpr, self).__init__()
         self.values = values or []
+        for expr in values: expr.parent = self
 
     def _evaltype(self):
         # TODO - Unify the types of child exprs and find the tightest type here Damn It!!!
@@ -170,6 +180,10 @@ class IfExpr(Expr):
         super(IfExpr, self).__init__()
         self.cases = cases or []
         self.default_expr = default_expr or []
+        for condition, expr in self.cases:
+            condition.parent = self
+            expr.parent = self
+        if default_expr: default_expr.parent = self
 
     def __repr__(self):
         return "<IfExp - ID: 0x%x>" % (id(self))

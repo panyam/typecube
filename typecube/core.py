@@ -578,7 +578,8 @@ class TypeArg(Expr, Annotatable):
         self.is_optional = is_optional
         self.default_value = default_value or None
         self.type_expr = type_expr
-        self.type_expr.parent = self
+        if not self.type_expr.parent:
+            self.type_expr.parent = self
 
     def deepcopy(self, newparent):
         return TypeArg(self.name, self.type_expr.deepcopy(newparent), self.is_optional, self.default_value, self.annotations, self.docs)
