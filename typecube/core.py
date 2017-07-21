@@ -524,7 +524,8 @@ class TypeFun(Type):
         for param in self.type_params:
             if param == name:
                 if condition is None or condition(arg.type_expr):
-                    return KindType
+                    # Then return this as a literal type!
+                    return make_literal_type(param)
                 break
         return None
 
