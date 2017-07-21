@@ -35,14 +35,15 @@ class Expr(NameResolver):
         self.set_parent(value)
 
     def set_parent(self, value):
-        self.validate_parent(value)
-        oldvalue = self._parent
-        self._parent = value
-        self.parent_changed(oldvalue)
+        if self.validate_parent(value):
+            oldvalue = self._parent
+            self._parent = value
+            self.parent_changed(oldvalue)
 
     def validate_parent(self, value):
         if self._parent is not None and value != self._parent:
             set_trace()
+        return True
 
     def parent_changed(self, oldvalue):
         pass
@@ -395,7 +396,9 @@ class LiteralType(Type):
     def deepcopy(self, newparent):
         return LiteralType(self.fqn, newparent, self.annotations, self.docs)
 
-    # def validate_parent(self, value): pass
+    def validate_parent(self, value):
+        """ With literal types once the parent is set, we dont want them changed. """
+        return self.parent is None
 
 class AliasType(Type):
     def __init__(self, fqn, target_type, parent, annotations = None, docs = ""):
@@ -483,7 +486,7 @@ class TypeFun(Type):
         self.is_external = type_expr is None
         # Ok to set parent since if the type expr is a ref only the reference's parent set
         # but the "real" underlying parent will have its type pointing to where ever it was
-        # created
+        # created, lexically
         if type_expr:
             self.type_expr.parent = self
 
