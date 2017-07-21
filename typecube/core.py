@@ -145,10 +145,23 @@ class Fun(Expr, Annotatable):
         self.fqn = fqn
         self.fun_type = fun_type
         self.fun_type.parent = self.parent
+        self._expr = None
         self.expr = expr
-        if self.expr:
-            self.expr.parent = self
         self.temp_variables = {}
+
+    @property
+    def expr(self):
+        return self._expr
+
+    @expr.setter
+    def expr(self, value):
+        if self._expr:
+            # Set old expr's parent to None
+            # TODO - This has to be forced
+            self._expr.parent = None
+        self._expr = value
+        if value:
+            value.parent = self
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
