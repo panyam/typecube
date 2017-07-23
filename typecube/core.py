@@ -148,10 +148,9 @@ class Var(Expr):
             assert target is not None, "Could not resolve '%s'" % first
         return target
 
-class Abs(Annotatable):
+class Abs(object):
     """ Base of all abstractions/function expressions. """
-    def __init__(self, fqn, expr, annotations = None, docs = ""):
-        Annotatable.__init__(self, annotations, docs)
+    def __init__(self, fqn, expr):
         self.fqn = fqn
         self._expr = None
         self.expr = expr
@@ -194,14 +193,15 @@ class App(object):
         return self.expr.equals(another.expr) and \
                 self.args.equals(another.args)
 
-class Fun(Expr, Abs):
+class Fun(Expr, Abs, Annotatable):
     """
     Defines a function binding along with the mappings to each of the 
     specific backends.
     """
     def __init__(self, fqn, fun_type, expr, parent, annotations = None, docs = ""):
         Expr.__init__(self, parent)
-        Abs.__init__(self, fqn, expr, annotations = None, docs = "")
+        Abs.__init__(self, fqn, expr)
+        Annotatable.__init__(self, annotations, docs)
         self.fun_type = fun_type
         self.fun_type.parent = self.parent
         self.temp_variables = {}
@@ -536,8 +536,8 @@ class TypeRef(Type):
 
 class TypeFun(Type, Abs):
     def __init__(self, fqn, type_params, expr, parent, annotations = None, docs = ""):
-        Type.__init__(self, fqn, parent, annotations = None, docs = "")
-        Abs.__init__(self, fqn, expr, annotations = None, docs = "")
+        Type.__init__(self, fqn, parent, annotations, docs)
+        Abs.__init__(self, fqn, expr)
         assert not expr or istype(expr)
         self.type_params = type_params
 
