@@ -34,7 +34,7 @@ def can_substitute(peg_typeexpr, hole_typeexpr):
         return False
 
     for arg1,arg2 in izip(resolved_peg.args, resolved_hole.args):
-        if not can_substitute(arg1.type_expr.resolved_value, arg2.type_expr.resolved_value):
+        if not can_substitute(arg1.expr.resolved_value, arg2.expr.resolved_value):
             return False
 
     return True

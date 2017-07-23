@@ -10,22 +10,22 @@ def signature_for_type(thetype, resolver, visited = None):
     if thetype.args:
         argsigs = []
         for arg in thetype.args:
-            if isinstance(arg.type_expr, Var):
-                argsigs.append(str(arg.type_expr.field_path))
-            elif isinstance(arg.type_expr, FunApp):
-                assert arg.type_expr.is_type_app
+            if isinstance(arg.expr, Var):
+                argsigs.append(str(arg.expr.field_path))
+            elif isinstance(arg.expr, FunApp):
+                assert arg.expr.is_type_app
                 ipdb.set_trace()
             else:
-                argsigs.append(signature_for_typeexpr(arg.type_expr, resolver, visited))
+                argsigs.append(signature_for_typeexpr(arg.expr, resolver, visited))
         signature += "<" + ", ".join(argsigs) + ">"
     return signature
 
-def signature_for_typeexpr(type_expr, resolver, visited = None, signature_for_type = signature_for_type):
+def signature_for_typeexpr(expr, resolver, visited = None, signature_for_type = signature_for_type):
     if visited is None: visited = set()
-    exprtype = type_expr
+    exprtype = expr
     import core as tlcore
-    if not isinstance(type_expr, tlcore.Type):
-        exprtype = type_expr.evaltype(resolver)
+    if not isinstance(expr, tlcore.Type):
+        exprtype = expr.evaltype(resolver)
     return signature_for_type(exprtype, resolver, visited = visited)
 
 def ensure_types(**conditions):
@@ -202,7 +202,7 @@ class FieldPath(object):
         return self._parts[0], FieldPath(self._parts[1:], self._children_copy)
 
     def poptail(self):
-        return self._parts[-1], FieldPath(self._parts[:-1], self._children_copy)
+        return FieldPath(self._parts[:-1], self._children_copy), self._parts[-1]
 
     def push(self, part):
         return FieldPath([part] + self._parts[:], self._children_copy)
