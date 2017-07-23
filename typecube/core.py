@@ -345,7 +345,13 @@ class FunApp(Expr, App):
         if type(function) is not Fun:
             set_trace()
             raise errors.TLException("Fun '%s' is not a function" % (self.expr))
-        return function
+        arg_values = [arg.resolve() for arg in self.args]
+
+        # Wont do currying for now
+        if len(arg_values) != len(function.fun_type.source_typeargs):
+            raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
+                                            (function.name, len(function.source_typeargs), len(self.args)))
+        return function, arg_values
 
     def __repr__(self):
         return "<FunApp(0x%x) Expr = %s, Args = (%s)>" % (id(self), repr(self.expr), ", ".join(map(repr, self.args)))
@@ -358,18 +364,12 @@ class FunApp(Expr, App):
         # First resolve the expr to get the source function
         # Here we need to decide if the function needs to be "duplicated" for each different type
         # This is where type re-ification is important - both at buildtime and runtime
-        function = self.resolve_function()
-        arg_values = [arg.resolve() for arg in self.args]
-
-        # Wont do currying for now
-        if len(arg_values) != len(function.source_typeargs):
-            raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
-                                            (function.name, len(function.source_typeargs), len(self.args)))
+        fun, args = self.resolve_function()
 
         # TODO - check arg types match
-        if function != self.expr or any(x != y for x,y in zip(arg_values, self.args)):
+        if fun != self.expr or any(x != y for x,y in zip(args, self.args)):
             # Only return a new expr if any thing has changed
-            return FunApp(function, arg_values)
+            return FunApp(fun, args)
         return self
 
 class Type(Expr, Annotatable):
@@ -574,13 +574,7 @@ class TypeApp(Type, App):
         new_typeargs = [arg.reduce_with_bindings(None, bindings) for arg in self.args]
         return make_type_app(new_typefun, new_typeargs, parent, self.annotations, self.docs)
 
-    def _resolve(self):
-        """ Resolves a type application. 
-        This will apply the type arguments to the type function.
-        """
-        # First resolve the expr to get the source function
-        # Here we need to decide if the function needs to be "duplicated" for each different type
-        # This is where type re-ification is important - both at buildtime and runtime
+    def resolve_function(self):
         typefun = self.expr.resolve()
         typeargs = [arg.resolve() for arg in self.args]
         if not typefun:
@@ -589,17 +583,26 @@ class TypeApp(Type, App):
             raise errors.TLException("Fun '%s' is not a function" % typefun)
 
         # Wont do currying for now
-        if len(typeargs) != len(typefun.type_params):
+        if len(args) != len(typefun.type_params):
             raise errors.TLException("TypeFun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
                                             (typefun.name, len(typefun.source_typeargs), len(self.args)))
+        return typefun, typeargs
+
+    def _resolve(self):
+        """ Resolves a type application. 
+        This will apply the type arguments to the type function.
+        """
+        # First resolve the expr to get the source function
+        # Here we need to decide if the function needs to be "duplicated" for each different type
+        # This is where type re-ification is important - both at buildtime and runtime
+        fun,args = self.resolve_function()
 
         # TODO - check arg types match
-        if typefun.is_external:
-            # Then typefun has no expression where we can do beta reductions so just
+        if fun.is_external:
+            # Then typefun has no expression to reduce so just
             # return a new typeapp with the arguments instead
             return self
-
-        return typefun.apply(typeargs)
+        return fun.apply(args)
 
 class TypeArg(Expr, Annotatable):
     """ A type argument is a child of a given type.  Akin to a member/field of a type.  """
