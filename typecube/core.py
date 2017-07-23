@@ -396,7 +396,7 @@ class Type(Expr, Annotatable):
         return True
 
     @property
-    def is_literal_type(self):
+    def is_atomic_type(self):
         # Named basic types
         return False
 
@@ -433,15 +433,15 @@ class Type(Expr, Annotatable):
             out["docs"] = self.docs
         return out
 
-class LiteralType(Type):
+class AtomicType(Type):
     @property
-    def is_literal_type(self): return True
+    def is_atomic_type(self): return True
 
     def reduce_with_bindings(self, parent, bindings):
         return self
 
     def deepcopy(self, newparent):
-        return LiteralType(self.fqn, newparent, self.annotations, self.docs)
+        return AtomicType(self.fqn, newparent, self.annotations, self.docs)
 
     def validate_parent(self, value):
         """ With literal types once the parent is set, we dont want them changed. """
@@ -554,7 +554,7 @@ class TypeFun(Type, Abs):
             if param == name:
                 if condition is None or condition(arg.expr):
                     # Then return this as a literal type!
-                    return make_literal_type(param)
+                    return make_atomic_type(param)
                 break
         return None
 
@@ -717,8 +717,8 @@ class TypeArgList(object):
                 raise errors.TLException("Child type by the given name '%s' already exists" % arg.name)
         self._typeargs.append(arg)
 
-def make_literal_type(fqn, parent = None, annotations = None, docs = ""):
-    return LiteralType(fqn, parent, annotations, docs)
+def make_atomic_type(fqn, parent = None, annotations = None, docs = ""):
+    return AtomicType(fqn, parent, annotations, docs)
 
 def make_product_type(tag, fqn, typeargs, parent = None, annotations = None, docs = ""):
     return ProductType(tag, fqn, typeargs, parent, annotations = None, docs = "")
@@ -750,6 +750,6 @@ def make_enum_type(fqn, symbols, parent = None, annotations = None, docs = None)
         ta.expr = out
     return out
 
-KindType = make_literal_type("Type")
-AnyType = make_literal_type("any")
-VoidType = make_literal_type("void")
+KindType = make_atomic_type("Type")
+AnyType = make_atomic_type("any")
+VoidType = make_atomic_type("void")

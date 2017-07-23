@@ -6,13 +6,13 @@ from typecube.annotations import Annotatable
 from typecube import unifier as tlunifier
 from typecube.utils import FieldPath
 
-BooleanType = tlcore.make_literal_type("boolean")
-ByteType = tlcore.make_literal_type("byte")
-IntType = tlcore.make_literal_type("int")
-LongType = tlcore.make_literal_type("long")
-FloatType = tlcore.make_literal_type("float")
-DoubleType = tlcore.make_literal_type("double")
-StringType = tlcore.make_literal_type("string")
+BooleanType = tlcore.make_atomic_type("boolean")
+ByteType = tlcore.make_atomic_type("byte")
+IntType = tlcore.make_atomic_type("int")
+LongType = tlcore.make_atomic_type("long")
+FloatType = tlcore.make_atomic_type("float")
+DoubleType = tlcore.make_atomic_type("double")
+StringType = tlcore.make_atomic_type("string")
 MapType = tlcore.make_type_fun("map", ["K", "V"], None, None)
 ListType = tlcore.make_type_fun("list", ["V"], None, None)
 
