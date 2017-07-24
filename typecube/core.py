@@ -27,8 +27,16 @@ class Expr(NameResolver):
         self._parent = parent
 
     @property
-    def is_type(self):
-        return False
+    def is_type(self): return False
+
+    @property
+    def is_type_op(self): return False
+
+    @property
+    def is_fun(self): return False
+
+    @property
+    def is_fun_app(self): return False
 
     def clear_parent(self):
         """ Clears the parent of an expression.
@@ -150,10 +158,13 @@ class Var(Expr):
 
 class Abs(object):
     """ Base of all abstractions/function expressions. """
-    def __init__(self, fqn, expr):
+    def __init__(self, fqn, expr, fun_type):
         self.fqn = fqn
         self._expr = None
         self.expr = expr
+        self.fun_type = fun_type
+        if self.fun_type:
+            self.fun_type.parent = self
 
     @property
     def expr(self):
@@ -175,6 +186,11 @@ class Abs(object):
 
     @property
     def is_external(self): return self.expr is None
+
+    def apply(self, args):
+        assert self.expr is not None
+        bindings = dict(zip(self.params, args))
+        return self.expr.reduce_with_bindings(bindings, self.parent)
 
 class App(object):
     """ Base of all application expressions. """
@@ -198,65 +214,36 @@ class Fun(Expr, Abs, Annotatable):
     Defines a function binding along with the mappings to each of the 
     specific backends.
     """
-    def __init__(self, fqn, fun_type, expr, parent, annotations = None, docs = ""):
+    def __init__(self, fqn, expr, fun_type, parent, annotations = None, docs = ""):
         Expr.__init__(self, parent)
-        Abs.__init__(self, fqn, expr)
+        Abs.__init__(self, fqn, expr, fun_type)
         Annotatable.__init__(self, annotations, docs)
-        self.fun_type = fun_type
-        self.fun_type.parent = self.parent
         self.temp_variables = {}
+
+    @property
+    def params(self): return [ta.name for ta in self.fun_type.source_typeargs]
+
+    @property
+    def is_fun(self): return True
+
+    @property
+    def is_quant(self): return False
 
     def _equals(self, another):
         return self.fqn == another.fqn and \
                 self.fun_type.equals(another.fun_type) and \
                 self.expr.equals(another.expr)
 
-    def __json__(self, **kwargs):
-        out = {}
-        if self.fqn:
-            out["fqn"] = self.fqn
-        if kwargs.get("include_docs", False) and self.docs:
-            out["docs"] = self.docs
-        if self.fun_type:
-            out["type"] = self.fun_type.json(**kwargs)
-        return out
-
-    def debug_show(self, level = 0):
-        function = self
-        print ("  " * (level)) + "SourceArgs:"
-        for typearg in function.fun_type.args:
-            print ("  " * (level + 1)) + ("%s: %s" % (typearg.name,typearg))
-
-        print ("  " * (level)) + "OutputArg:"
-        if function.fun_type.output_arg:
-            print ("  " * (level + 1)) + "%s" % function.fun_type.output_arg
-
-        print ("  " * (level)) + "Locals:"
-        for key,value in self.temp_variables.iteritems():
-            print ("  " * (level + 1)) + ("%s: %s" % (key, value))
-
     def _resolve_name(self, name, condition = None):
         """ Try to resolve a name to a local, source or destination variable. """
         # Check source types
-        out_typearg = None
         fun_type = self.fun_type
-        if fun_type.is_type_fun:
-            # Since this is a type function, also check parameters
-            for param in fun_type.type_params:
-                if param == name:
-                    return KindType
-            
-            # Did not match any type params
-            fun_type = fun_type.expr.resolve()
-            assert fun_type.is_function_type
-
-        for typearg in fun_type.source_typeargs:
+        for typearg in self.fun_type.source_typeargs:
             if typearg.name == name:
-                out_typearg = typearg
-                if out_typearg.expr == KindType:
+                if typearg.expr == KindType:
                     set_trace()
                     # TODO: *something?*
-                return out_typearg.expr
+                return typearg.expr
 
         # Check if this is the "output" arg
         if fun_type.return_typearg and fun_type.return_typearg.name == name:
@@ -266,8 +253,6 @@ class Fun(Expr, Abs, Annotatable):
         if self.is_temp_variable(name):
             # Check local variables
             return self.temp_var_type(name)
-
-        return out_typearg
 
     def _resolve(self):
         """
@@ -280,14 +265,17 @@ class Fun(Expr, Abs, Annotatable):
         resolved_expr = None if not self.expr else self.expr.resolve()
         if new_fun_type == self.fun_type and resolved_expr == self.expr:
             return self
-        out = Fun(self.name, new_fun_type, resolved_expr, self.parent, self.annotations, self.docs)
+        out = Fun(self.fqn, resolved_expr, new_fun_type, self.parent, self.annotations, self.docs)
         return out
 
     def _evaltype(self):
         return self.resolve().fun_type
 
     def __repr__(self):
-        return "<%s(0x%x) %s>" % (self.__class__.__name__, id(self), self.fqn)
+        if self.fqn:
+            return "<%s(0x%x) %s>" % (self.__class__.__name__, id(self), self.fqn)
+        else:
+            return "<%s(0x%x)>" % (self.__class__.__name__, id(self))
 
     def matches_input(self, input_typeexprs):
         """Tells if the input types can be accepted as argument for this transformer."""
@@ -323,6 +311,9 @@ class FunApp(Expr, App):
         App.__init__(self, expr, args)
         Expr.__init__(self)
         self.args = args
+
+    @property
+    def is_fun_app(self): return True
 
     def _evaltype(self):
         resolved = self.resolve()
@@ -413,9 +404,6 @@ class Type(Expr, Annotatable):
     def is_type_app(self): return False
 
     @property
-    def is_type_fun(self): return False
-
-    @property
     def is_typeref(self): return False
 
     @property
@@ -425,19 +413,11 @@ class Type(Expr, Annotatable):
     def name(self):
         return self.fqn.split(".")[-1]
 
-    def __json__(self, **kwargs):
-        out = {}
-        if self.fqn:
-            out["fqn"] = self.fqn
-        if kwargs.get("include_docs", False) and self.docs:
-            out["docs"] = self.docs
-        return out
-
 class AtomicType(Type):
     @property
     def is_atomic_type(self): return True
 
-    def reduce_with_bindings(self, parent, bindings):
+    def reduce_with_bindings(self, bindings, parent = None):
         return self
 
     def deepcopy(self, newparent):
@@ -466,8 +446,8 @@ class ContainerType(Type):
         for arg in self.args:
             arg.parent = self
 
-    def reduce_with_bindings(self, parent, bindings):
-        typeargs = [TypeArg(ta.name, ta.expr.reduce_with_bindings(None, bindings),
+    def reduce_with_bindings(self, bindings, parent = None):
+        typeargs = [TypeArg(ta.name, ta.expr.reduce_with_bindings(bindings),
                             ta.is_optional, ta.default_value, ta.annotations, ta.docs) for ta in self.args]
         return self.__class__(self.tag, self.fqn, typeargs, parent, self.annotations, self.docs)
 
@@ -499,18 +479,26 @@ class SumType(ContainerType):
         return SumType(self.tag, self.fqn, [ta.deepcopy(None) for ta in self.args], newparent, self.annotations, self.docs)
 
 class FunType(Type):
-    """ Represents function types. """
+    """ Represents function types.
+    Note that function types do not reference the "names" of the function parameters.
+    """
     def __init__(self, fqn, source_typeargs, return_typearg, parent, annotations = None, docs = ""):
         Type.__init__(self, fqn, parent, annotations, docs)
         self.return_typearg = return_typearg
         self.source_typeargs = source_typeargs
         for arg in self.source_typeargs:
-            arg.parent = self
-        if self.return_typearg:
+            if not arg.parent:
+                arg.parent = self
+        if self.return_typearg and not self.return_typearg.parent:
             self.return_typearg.parent = self
 
     @property
     def is_function_type(self): return True
+
+    def reduce_with_bindings(self, bindings, parent = None):
+        new_source_typeargs = [st.reduce_with_bindings(bindings) for st in self.source_typeargs]
+        new_return_typearg = None if not self.return_typearg else self.return_typearg.reduce_with_bindings(bindings)
+        return FunType(fqn, new_source_typeargs, new_return_typearg, parent, self.annotations, self.docs)
 
 class TypeRef(Type):
     @property
@@ -534,23 +522,37 @@ class TypeRef(Type):
     def _resolve(self):
         return self.resolve_name(self.fqn)
 
-class TypeFun(Type, Abs):
-    def __init__(self, fqn, type_params, expr, parent, annotations = None, docs = ""):
-        Type.__init__(self, fqn, parent, annotations, docs)
-        Abs.__init__(self, fqn, expr)
-        assert not expr or istype(expr)
-        self.type_params = type_params
+class Quant(Fun):
+    """ A quantification or a generic function.
+    
+    Unlike normal functions (abstractions), which take terms/expressions as arguments, a Quantification takes types arguments
+    and returns an expression with the arguments substituted with the types.
+    """
+    def __init__(self, fqn, params, expr, parent, annotations = None, docs = ""):
+        fun_type = make_fun_type(None, [TypeArg(p, KindType) for p in params], TypeArg(None, KindType), self)
+        Fun.__init__(self, fqn, expr, fun_type, parent, annotations, docs)
+
+    @property
+    def is_quant(self): return True
+
+class TypeOp(Fun):
+    """ Type operators are "functions" over types.  They take proper types as arguments and return new types.  
+    Type operators are NOT types, but just expressions (abstractions) that return types. """
+    def __init__(self, fqn, params, expr, parent, annotations = None, docs = ""):
+        fun_type = make_fun_type(None, [TypeArg(p, KindType) for p in params], TypeArg(None, KindType), self)
+        Fun.__init__(self, fqn, expr, fun_type, parent, annotations, docs)
+        assert not expr or expr.is_type
+
+    @property
+    def is_type_op(self): return True
 
     def apply(self, typeargs):
         assert self.expr is not None
-        bindings = dict(zip(self.type_params, typeargs))
+        bindings = dict(zip(self.params, typeargs))
         return self.expr.reduce_with_bindings(self.parent, bindings)
 
-    @property
-    def is_type_fun(self): return True
-
     def _resolve_name(self, name, condition = None):
-        for param in self.type_params:
+        for param in self.params:
             if param == name:
                 if condition is None or condition(arg.expr):
                     # Then return this as a literal type!
@@ -579,12 +581,12 @@ class TypeApp(Type, App):
         typeargs = [arg.resolve() for arg in self.args]
         if not typefun:
             raise errors.TLException("Fun '%s' is undefined" % self.args[0])
-        if not typefun.is_type_fun:
+        if not typefun.is_type_op:
             raise errors.TLException("Fun '%s' is not a function" % typefun)
 
         # Wont do currying for now
-        if len(args) != len(typefun.type_params):
-            raise errors.TLException("TypeFun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
+        if len(args) != len(typefun.params):
+            raise errors.TLException("TypeOp '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
                                             (typefun.name, len(typefun.source_typeargs), len(self.args)))
         return typefun, typeargs
 
@@ -625,12 +627,6 @@ class TypeArg(Expr, Annotatable):
                 self.is_optional == another.is_optional and \
                 (self.default_value == another.default_value or self.default_value.equals(another.default_value)) and \
                 self.expr.equals(another.expr)
-
-    def __json__(self, **kwargs):
-        out = {}
-        if self.name:
-            out["name"] = self.name
-        return out
 
     def _evaltype(self):
         """ Type of a "Type" is a KindType!!! """
@@ -732,8 +728,8 @@ def make_fun_type(fqn, source_typeargs, return_typearg, parent = None, annotatio
 def make_alias(fqn, target_type, parent = None, annotations = None, docs = ""):
     return AliasType(fqn, target_type, parent, annotations, docs)
 
-def make_type_fun(fqn, type_params, expr, parent, annotations = None, docs = ""):
-    return TypeFun(fqn, type_params, expr, parent, annotations = None, docs = "")
+def make_type_op(fqn, type_params, expr, parent, annotations = None, docs = ""):
+    return TypeOp(fqn, type_params, expr, parent, annotations = None, docs = "")
 
 def make_ref(target_fqn, parent = None, annotations = None, docs = None):
     return TypeRef(target_fqn, parent, annotations = annotations, docs = docs)

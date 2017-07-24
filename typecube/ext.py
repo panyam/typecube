@@ -13,8 +13,8 @@ LongType = tlcore.make_atomic_type("long")
 FloatType = tlcore.make_atomic_type("float")
 DoubleType = tlcore.make_atomic_type("double")
 StringType = tlcore.make_atomic_type("string")
-MapType = tlcore.make_type_fun("map", ["K", "V"], None, None)
-ListType = tlcore.make_type_fun("list", ["V"], None, None)
+MapType = tlcore.make_type_op("map", ["K", "V"], None, None)
+ListType = tlcore.make_type_op("list", ["V"], None, None)
 
 class NewExpr(Expr):
     """ An expression used to create instead of a type.  It can be passed values for its child arguments.

@@ -13,34 +13,6 @@ class Annotatable(object):
         self._annotations = annotations or Annotations()
         self.docs = docs or ""
 
-    def __repr__(self):
-        try:
-            json = self.json()
-            if AS_JSON:
-                ios = cStringIO.StringIO()
-                pprint.pprint(json, ios)
-                ios.seek(0)
-                return ios.read()
-            else:
-                from yaml import dump
-                return dump(json, default_flow_style = False)
-        except:
-            traceback.print_exc()
-            return ""
-
-
-    def __json__(self, **kwargs):
-        return {}
-
-    def json(self, **kwargs):
-        out = self.__json__(**kwargs)
-        if not kwargs.get("no_id", False):
-            if "__id__" not in out:
-                out["__id__"] = id(self)
-            if "__cls__" not in out:
-                out["__cls__"] = self.__class__.__name__
-        return out
-
     def set_annotations(self, annotations):
         self.annotations = annotations
         return self
