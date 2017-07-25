@@ -424,7 +424,7 @@ class AtomicType(Type):
         return AtomicType(self.fqn, newparent, self.annotations, self.docs)
 
     def validate_parent(self, value):
-        """ With literal types once the parent is set, we dont want them changed. """
+        """ With atomic types once the parent is set, we dont want them changed. """
         return self.parent is None
 
 class AliasType(Type):
@@ -555,7 +555,7 @@ class TypeOp(Fun):
         for param in self.params:
             if param == name:
                 if condition is None or condition(arg.expr):
-                    # Then return this as a literal type!
+                    # Then return this as a atomic type!
                     return make_atomic_type(param)
                 break
         return None
