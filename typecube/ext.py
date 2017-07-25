@@ -25,9 +25,6 @@ class NewExpr(Expr):
         self.arg_values = arg_values or {}
         for expr in arg_values.iteritems(): expr.parent = self
 
-    def _evaltype(self):
-        return self.objtype.resolve()
-
     def _resolve(self):
         resolved_objtype = self.objtype.resolve()
         resolved_args = {key: value.resolve() for key,value in self.arg_values.iteritems()}
@@ -44,10 +41,6 @@ class Assignment(Expr):
     def _equals(self, another):
         return self.target_variable.equals(another.target_variable) and \
                 self.expr.equals(another.expr)
-
-    def _evaltype(self):
-        resolved_expr = self.expr.resolve()
-        return resolved_expr.evaltype()
 
     def _resolve(self):
         """
@@ -77,9 +70,6 @@ class Literal(Expr):
     def _equals(self, another):
         return self.value == another.value and self.value_type.equals(another.value_type)
 
-    def _evaltype(self):
-        return self.value_type
-
     def resolve(self, resolver):
         return self
 
@@ -106,10 +96,6 @@ class ExprList(Expr):
             for expr in children: expr.parent = self
         else:
             self.add(another)
-
-    def _evaltype(self):
-        resolved = self.resolve()
-        return resolved.children[-1].evaltype()
 
     def _resolve(self):
         resolved_exprs = [expr.resolve() for expr in self.children]
@@ -140,10 +126,6 @@ class ListExpr(Expr):
         self.values = values
         for expr in values: expr.parent = self
 
-    def _evaltype(self):
-        # TODO - Unify the types of child exprs and find the tightest type here Damn It!!!
-        return ListType.apply(tlcore.AnyType)
-
     def _resolve(self):
         """
         Processes an exprs and resolves name bindings and creating new local vars 
@@ -159,10 +141,6 @@ class TupleExpr(Expr):
         super(TupleExpr, self).__init__()
         self.values = values or []
         for expr in values: expr.parent = self
-
-    def _evaltype(self):
-        # TODO - Unify the types of child exprs and find the tightest type here Damn It!!!
-        return ListType.apply(tlcore.AnyType)
 
     def _resolve(self):
         """
