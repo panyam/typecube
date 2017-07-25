@@ -38,9 +38,8 @@ class Assignment(Expr):
         self.target_variable.parent = self
         self.expr.parent = self
 
-    def _equals(self, another):
-        return self.target_variable.equals(another.target_variable) and \
-                self.expr.equals(another.expr)
+    def beta_reduce(self, bindings):
+        return Assignment(self.target_variable.deepcopy, self.expr.beta_reduce(bindings))
 
     def _resolve(self):
         """
@@ -67,8 +66,8 @@ class Literal(Expr):
         self.value = value
         self.value_type = value_type
 
-    def _equals(self, another):
-        return self.value == another.value and self.value_type.equals(another.value_type)
+    def beta_reduce(self, bindings):
+        return Literal(self, value, self.value_type)
 
     def resolve(self, resolver):
         return self
@@ -82,6 +81,9 @@ class ExprList(Expr):
         Expr.__init__(self)
         self.children = children or []
         for expr in self.children: expr.parent = self
+
+    def beta_reduce(self, bindings):
+        return ExprList([c.beta_reduce(bindings) for c in self.children])
 
     def add(self, expr):
         if not issubclass(expr.__class__, Expr):
@@ -112,6 +114,9 @@ class DictExpr(Expr):
         for expr in values: expr.parent = self
         assert len(keys) == len(values)
 
+    def beta_reduce(self, bindings):
+        return DictExpr([k.beta_reduce(bindings) for k in self.keys], [v.beta_reduce(bindings) for v in self.values])
+
     def _resolve(self):
         for key,value in izip(self.keys, self.values):
             key.resolve()
@@ -125,6 +130,9 @@ class ListExpr(Expr):
         super(ListExpr, self).__init__()
         self.values = values
         for expr in values: expr.parent = self
+
+    def beta_reduce(self, bindings):
+        return ListExpr([v.beta_reduce(bindings) for v in self.values])
 
     def _resolve(self):
         """
@@ -141,6 +149,9 @@ class TupleExpr(Expr):
         super(TupleExpr, self).__init__()
         self.values = values or []
         for expr in values: expr.parent = self
+
+    def beta_reduce(self, bindings):
+        return ListExpr([v.beta_reduce(bindings) for v in self.values])
 
     def _resolve(self):
         """
