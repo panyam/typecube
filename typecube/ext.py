@@ -16,6 +16,7 @@ StringType = tlcore.make_atomic_type("string")
 MapType = tlcore.make_type_op("map", ["K", "V"], None, None)
 ListType = tlcore.make_type_op("list", ["V"], None, None)
 
+
 class NewExpr(Expr):
     """ An expression used to create instead of a type.  It can be passed values for its child arguments.
     This is just another shortcut for a function appication of a specific kind.
@@ -29,6 +30,24 @@ class NewExpr(Expr):
         resolved_objtype = self.objtype.resolve()
         resolved_args = {key: value.resolve() for key,value in self.arg_values.iteritems()}
         return self
+
+class Index(Expr):
+    """ A projection of either an index or a key into an expression. """
+    def __init__(self, expr, key):
+        Expr.__init__(self)
+        self.expr = expr
+        self.key = key
+        self.expr.parent = self
+
+    @property
+    def deepcopy(self):
+        return Index(self.expr.deepcopy, self.key)
+
+    def _resolve(self):
+        return Index(self.expr.resolve(), self.key)
+
+    def beta_reduce(self, bindings):
+        return Index(self.expr.beta_reduce(bindings), self.key)
 
 class Assignment(Expr):
     def __init__(self, target_variable, expr):

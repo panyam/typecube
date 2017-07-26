@@ -158,6 +158,9 @@ class FieldPath(object):
     def __repr__(self): 
         return str(self)
 
+    def __iter__(self):
+        return iter(self._parts)
+
     def __str__(self):
         if self.all_fields_selected:
             return "%s/*" % "/".join(self._parts)

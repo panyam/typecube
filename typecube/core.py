@@ -4,7 +4,6 @@ from ipdb import set_trace
 from collections import defaultdict
 from itertools import izip
 from typecube import errors
-from typecube.utils import FieldPath
 from typecube.annotations import Annotatable
 
 class NameResolver(object):
@@ -95,29 +94,28 @@ class Expr(NameResolver):
 
 class Var(Expr):
     """ An occurence of a name that can be bound to a value, a field or a type. """
-    def __init__(self, field_path):
-        super(Var, self).__init__()
-        if type(field_path) in (str, unicode):
-            field_path = FieldPath(field_path)
-        self.field_path = field_path
-        assert type(field_path) is FieldPath and field_path.length > 0
+    def __init__(self, name):
+        Expr.__init__(self)
+        assert type(name) in (str, unicode)
+        self.name = name
 
     def beta_reduce(self, bindings):
-        set_trace()
+        if name in bindings:
+            return bindings[name].deepcopy()
+        return self
 
     @property
     def deepcopy(self):
-        return Var(self.field_path)
+        return Var(self.name)
 
     def __repr__(self):
-        return "<VarExp - ID: 0x%x, Value: %s>" % (id(self), str(self.field_path))
+        return "<Var - ID: 0x%x, Value: %s>" % (id(self), self.name)
 
     def _resolve(self):
         """
         Returns the actual entry pointed to by the "first" part of the field path.
         """
-        first = self.field_path.get(0)
-        target = self.resolve_name(first)
+        target = self.resolve_name(self.name)
         if target is None:
             assert target is not None, "Could not resolve '%s'" % first
         return target
