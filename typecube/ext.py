@@ -3,7 +3,6 @@ import ipdb
 from typecube import core as tlcore
 from typecube.core import Expr
 from typecube.annotations import Annotatable
-from typecube import unifier as tlunifier
 
 BooleanType = tlcore.make_atomic_type("boolean")
 ByteType = tlcore.make_atomic_type("byte")
