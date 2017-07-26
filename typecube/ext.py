@@ -49,30 +49,17 @@ class Index(Expr):
         return Index(self.expr.beta_reduce(bindings), self.key)
 
 class Assignment(Expr):
-    def __init__(self, target_variable, expr):
+    def __init__(self, target, expr):
         Expr.__init__(self)
-        self.target_variable = target_variable
         self.expr = expr
-        self.target_variable.parent = self
         self.expr.parent = self
+        self.target = target
+        self.target.parent = self
 
     def beta_reduce(self, bindings):
-        return Assignment(self.target_variable.deepcopy, self.expr.beta_reduce(bindings))
+        return Assignment(self.target.deepcopy, self.expr.beta_reduce(bindings))
 
     def _resolve(self):
-        """
-        Processes an exprs and resolves name bindings and creating new local vars 
-        in the process if required.
-        """
-        # Resolve the target variable's binding.  This does'nt necessarily have
-        # to evaluate types.
-        # This will help us with type inference going backwards
-        resolved_var = self.target_variable.resolve()
-
-        # Resolve all types in child exprs.  
-        # Apart from just evaluating all child exprs, also make sure
-        # Resolve field paths that should come from source type
-        resolved_expr = self.expr.resolve()
         return self
 
 class Literal(Expr):
