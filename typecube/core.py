@@ -120,10 +120,11 @@ class Var(Expr):
             assert target is not None, "Could not resolve '%s'" % first
         return target
 
-class Abs(Expr):
+class Abs(Expr, Annotatable):
     """ Base of all abstractions/function expressions. """
-    def __init__(self, fqn, expr, parent, fun_type):
+    def __init__(self, fqn, expr, parent, fun_type, annotations = None, docs = ""):
         Expr.__init__(self, parent)
+        Annotatable.__init__(self, annotations, docs)
         self.fqn = fqn
         self._expr = None
         self.expr = expr
@@ -230,11 +231,10 @@ class App(Expr):
             return self
         return fun.apply(args)
 
-class Fun(Abs, Annotatable):
+class Fun(Abs):
     """ An abstraction over expressions.  """
     def __init__(self, fqn, expr, fun_type, parent, annotations = None, docs = ""):
-        Abs.__init__(self, fqn, expr, parent, fun_type)
-        Annotatable.__init__(self, annotations, docs)
+        Abs.__init__(self, fqn, expr, parent, fun_type, annotations, docs)
         self.temp_variables = {}
 
     @property
