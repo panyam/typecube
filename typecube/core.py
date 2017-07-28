@@ -16,11 +16,12 @@ class NameResolver(object):
             return self.parent.resolve_name(name, condition)
         raise errors.TLException("Unable to resolve name: %s" % name)
 
-class Expr(NameResolver):
+class Expr(NameResolver, Annotatable):
     """
     Parent of all exprs.  All exprs must have a value.  Exprs only appear in functions.
     """
     def __init__(self, parent = None):
+        Annotatable.__init__(self)
         self._parent = parent
 
     def isany(self, cls):
@@ -62,12 +63,6 @@ class Expr(NameResolver):
         pass
 
     #########
-    def ensure_parents(self):
-        """ Ensures that all children have the parents setup correctly.  
-        Assumes that the parent of this expression is set corrected before this is called.
-        """
-        assert self.parent is not None
-        pass
 
     def resolve_name(self, name, condition = None):
         if self.parent is None:
@@ -79,14 +74,14 @@ class Expr(NameResolver):
         return None
 
     def resolve(self):
-        # Do caching of results here based on resolver!
+        # TODO: Cache resolved value
         return self._resolve()
 
     def _resolve(self):
         """ This method resolves a type expr to a type object. 
         The resolver is used to get bindings for names used in this expr.
         
-        Returns a ResolvedValue object that contains the final expr value after resolution of this expr.
+        Returns the resolved expression
         """
         set_trace()
         assert False, "Not Implemented"
@@ -120,11 +115,10 @@ class Var(Expr):
             assert target is not None, "Could not resolve '%s'" % first
         return target
 
-class Abs(Expr, Annotatable):
+class Abs(Expr):
     """ Base of all abstractions/function expressions. """
-    def __init__(self, fqn, expr, parent, fun_type, annotations = None, docs = ""):
+    def __init__(self, fqn, expr, parent, fun_type):
         Expr.__init__(self, parent)
-        Annotatable.__init__(self, annotations, docs)
         self.fqn = fqn
         self._expr = None
         self.expr = expr
@@ -233,8 +227,8 @@ class App(Expr):
 
 class Fun(Abs):
     """ An abstraction over expressions.  """
-    def __init__(self, fqn, expr, fun_type, parent, annotations = None, docs = ""):
-        Abs.__init__(self, fqn, expr, parent, fun_type, annotations, docs)
+    def __init__(self, fqn, expr, fun_type, parent):
+        Abs.__init__(self, fqn, expr, parent, fun_type)
         self.temp_variables = {}
 
     @property
@@ -317,8 +311,8 @@ class FunApp(App):
             return FunApp(fun, args)
         return self
 
-class Type(Expr, Annotatable):
-    def __init__(self, fqn, parent, annotations = None, docs = ""):
+class Type(Expr):
+    def __init__(self, fqn, parent):
         """
         Creates a new type function.  Type functions are responsible for creating concrete type instances
         or other (curried) type functions.
@@ -330,8 +324,6 @@ class Type(Expr, Annotatable):
             docs            Documentation string for the type.
         """
         Expr.__init__(self, parent)
-        Annotatable.__init__(self, annotations = annotations, docs = docs)
-
         # tag can indicate a further specialization of the type - eg "record", "enum" etc
         self.tag = None
         self.fqn = fqn
@@ -353,8 +345,8 @@ class AtomicType(Type):
         return self.parent is None
 
 class AliasType(Type):
-    def __init__(self, fqn, target_type, parent, annotations = None, docs = ""):
-        Type.__init__(self, fqn, parent, annotations, docs)
+    def __init__(self, fqn, target_type, parent):
+        Type.__init__(self, fqn, parent)
         self.target_type = target_type
         assert self.target_type.isany(Type)
 
@@ -363,8 +355,8 @@ class AliasType(Type):
         return make_alias(self.fqn, self.target_type, None, self.annotations, self.docs)
 
 class ContainerType(Type):
-    def __init__(self, fqn, typeargs, parent, annotations = None, docs = ""):
-        Type.__init__(self, fqn, parent, annotations, docs)
+    def __init__(self, fqn, typeargs, parent):
+        Type.__init__(self, fqn, parent)
         self.args = typeargs
         for arg in self.args:
             arg.parent = self
@@ -376,8 +368,8 @@ class ContainerType(Type):
 
 
 class ProductType(ContainerType):
-    def __init__(self, tag, fqn, typeargs, parent, annotations = None, docs = ""):
-        ContainerType.__init__(self, fqn, typeargs, parent, annotations, docs)
+    def __init__(self, tag, fqn, typeargs, parent):
+        ContainerType.__init__(self, fqn, typeargs, parent)
         self.tag = tag
 
     @property
@@ -385,8 +377,8 @@ class ProductType(ContainerType):
         return ProductType(self.tag, self.fqn, [ta.deepcopy for ta in self.args], None, self.annotations, self.docs)
 
 class SumType(ContainerType):
-    def __init__(self, tag, fqn, typeargs, parent, annotations = None, docs = ""):
-        ContainerType.__init__(self, fqn, typeargs, parent, annotations, docs)
+    def __init__(self, tag, fqn, typeargs, parent):
+        ContainerType.__init__(self, fqn, typeargs, parent)
         self.tag = tag
 
     @property
@@ -397,8 +389,8 @@ class FunType(Type):
     """ Represents function types.
     Note that function types do not reference the "names" of the function parameters.
     """
-    def __init__(self, fqn, source_typeargs, return_typearg, parent, annotations = None, docs = ""):
-        Type.__init__(self, fqn, parent, annotations, docs)
+    def __init__(self, fqn, source_typeargs, return_typearg, parent):
+        Type.__init__(self, fqn, parent)
         self.return_typearg = return_typearg
         self.source_typeargs = source_typeargs
         for arg in self.source_typeargs:
@@ -438,9 +430,9 @@ class Quant(Fun):
     Unlike normal functions (abstractions), which take terms/expressions as arguments, a Quantification takes types arguments
     and returns an expression with the arguments substituted with the types.
     """
-    def __init__(self, fqn, params, expr, parent, annotations = None, docs = ""):
+    def __init__(self, fqn, params, expr, parent
         fun_type = make_fun_type(None, [TypeArg(p, KindType) for p in params], TypeArg(None, KindType), self)
-        Fun.__init__(self, fqn, expr, fun_type, parent, annotations, docs)
+        Fun.__init__(self, fqn, expr, fun_type, parent)
 
 class QuantApp(App):
     """ Application of a quantification to type expressions. """
@@ -457,19 +449,19 @@ class QuantApp(App):
 class TypeOp(Fun):
     """ Type operators are "functions" over types.  They take proper types as arguments and return new types.  
     Type operators are NOT types, but just expressions (abstractions) that return types. """
-    def __init__(self, fqn, params, expr, parent, annotations = None, docs = ""):
+    def __init__(self, fqn, params, expr, parent):
         fun_type = make_fun_type(None, [TypeArg(p, KindType) for p in params], TypeArg(None, KindType), self)
-        Fun.__init__(self, fqn, expr, fun_type, parent, annotations, docs)
+        Fun.__init__(self, fqn, expr, fun_type, parent)
         assert not expr or expr.isany(Type)
 
 class TypeApp(Type, App):
     """ Application of a type operator. Unlike quantifications or functions, 
     this returns a type when types are passed as arguments. """
-    def __init__(self, expr, args, parent, annotations = None, docs = ""):
+    def __init__(self, expr, args, parent):
         if type(expr) in (str, unicode):
             expr = make_ref(expr)
         App.__init__(self, expr, args)
-        Type.__init__(self, None, parent, annotations = None, docs = "")
+        Type.__init__(self, None, parent)
         assert(all(t.isany(Type) for t in args)), "All type args in a TypeApp must be Type sub classes"
 
     @property
@@ -482,11 +474,10 @@ class TypeApp(Type, App):
             raise errors.TLException("'%s' is not a type operator" % typefun)
         return fun,args
 
-class TypeArg(Expr, Annotatable):
+class TypeArg(Expr):
     """ A type argument is a child of a given type.  Akin to a member/field of a type.  """
-    def __init__(self, name, expr, is_optional = False, default_value = None, annotations = None, docs = ""):
+    def __init__(self, name, expr, is_optional = False, default_value = None):
         Expr.__init__(self, None)
-        Annotatable.__init__(self, annotations, docs)
         self.name = name
         self.is_optional = is_optional
         self.default_value = default_value or None
@@ -508,7 +499,8 @@ class TypeArg(Expr, Annotatable):
             return self
         new_expr = self.expr.resolve()
         if new_expr != self.expr:
-            out =  TypeArg(self.name, new_expr, self.is_optional, self.docs, annotations = self.annotations, docs = self.docs)
+            out =  TypeArg(self.name, new_expr, self.is_optional, self.default_value)
+            out.set_annotations(self.annotations).set_docs(self.docs)
         return out
 
     def unwrap_with_field_path(self, full_field_path):
@@ -582,35 +574,37 @@ class TypeArgList(object):
                 raise errors.TLException("Child type by the given name '%s' already exists" % arg.name)
         self._typeargs.append(arg)
 
-def make_atomic_type(fqn, parent = None, annotations = None, docs = ""):
-    return AtomicType(fqn, parent, annotations, docs)
+def make_atomic_type(fqn, parent = None):
+    return AtomicType(fqn, parent)
 
-def make_product_type(tag, fqn, typeargs, parent = None, annotations = None, docs = ""):
-    return ProductType(tag, fqn, typeargs, parent, annotations = None, docs = "")
+def make_product_type(tag, fqn, typeargs, parent = None):
+    return ProductType(tag, fqn, typeargs, parent)
 
-def make_sum_type(tag, fqn, typeargs, parent = None, annotations = None, docs = ""):
-    return SumType(tag, fqn, typeargs, parent, annotations = None, docs = "")
+def make_sum_type(tag, fqn, typeargs, parent = None):
+    return SumType(tag, fqn, typeargs, parent)
 
-def make_fun_type(fqn, source_typeargs, return_typearg, parent = None, annotations = None, docs = ""):
-    return FunType(fqn, source_typeargs, return_typearg, parent, annotations, docs)
+def make_fun_type(fqn, source_typeargs, return_typearg, parent = None):
+    return FunType(fqn, source_typeargs, return_typearg, parent)
 
-def make_alias(fqn, target_type, parent = None, annotations = None, docs = ""):
-    return AliasType(fqn, target_type, parent, annotations, docs)
+def make_alias(fqn, target_type, parent = None):
+    return AliasType(fqn, target_type, parent)
 
-def make_type_op(fqn, type_params, expr, parent, annotations = None, docs = ""):
-    return TypeOp(fqn, type_params, expr, parent, annotations = None, docs = "")
+def make_type_op(fqn, type_params, expr, parent):
+    return TypeOp(fqn, type_params, expr, parent)
 
-def make_ref(target_fqn, parent = None, annotations = None, docs = None):
-    return TypeRef(target_fqn, parent, annotations = annotations, docs = docs)
+def make_ref(target_fqn, parent = None):
+    return TypeRef(target_fqn, parent)
 
-def make_type_app(expr, typeargs, parent = None, annotations = None, docs = ""):
-    return TypeApp(expr, typeargs, parent, annotations, docs)
+def make_type_app(expr, typeargs, parent = None):
+    return TypeApp(expr, typeargs, parent)
 
-def make_enum_type(fqn, symbols, parent = None, annotations = None, docs = None):
+def make_enum_type(fqn, symbols, parent = None):
     typeargs = []
     for name,value,sym_annotations,sym_docs in symbols:
-        typeargs.append(TypeArg(name, VoidType, False, value, sym_annotations, sym_docs))
-    out = SumType("enum", fqn, typeargs, parent, annotations = annotations, docs = docs)
+        ta = TypeArg(name, VoidType, False, value)
+        ta.set_annotations(sym_annotations).set_docs(sym_docs)
+        typeargs.append(ta)
+    out = SumType("enum", fqn, typeargs, parent)
     for ta in typeargs:
         ta.expr = out
     return out

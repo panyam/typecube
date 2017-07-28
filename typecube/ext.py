@@ -14,6 +14,12 @@ StringType = tlcore.make_atomic_type("string")
 MapType = tlcore.make_type_op("map", ["K", "V"], None, None)
 ListType = tlcore.make_type_op("list", ["V"], None, None)
 
+class MatchExp(Expr):
+    def __init__(self, patterns, expr):
+        self.patterns = patterns
+        for pat in patterns: pat.parent = self
+        self.expr = expr
+        self.expr.parent = self
 
 class NewExpr(Expr):
     """ An expression used to create instead of a type.  It can be passed values for its child arguments.
@@ -198,3 +204,96 @@ class IfExpr(Expr):
         # TODO: Return a union type instead
         self._evaluated_typeexpr = tlcore.VoidType
         return self
+
+class Module(Expr, Annotatable):
+    def __init__(self, fqn, parent = None, annotations = None, docs = ""):
+        Expr.__init__(self, parent)
+        Annotatable.__init__(self, annotations, docs)
+        self._fqn = fqn
+        self._parent = parent 
+        self.entity_map = {}
+        self.child_entities = []
+        self.aliases = {}
+
+    @property
+    def name(self):
+        return self.fqn.split(".")[-1]
+
+    def set_alias(self, name, fqn):
+        """Sets the alias of a particular name to an FQN."""
+        self.aliases[name] = fqn
+        return self
+
+    def find_fqn(self, fqn):
+        """Looks for a FQN in either the aliases or child entities or recursively in the parent."""
+        out = None
+        curr = self
+        while curr and not out:
+            out = curr.aliases.get(fqn, None)
+            if not out:
+                out = curr.get(fqn)
+            if not out:
+                curr = curr.parent
+        return out
+
+    def _resolve_name(self, name, condition = None):
+        # TODO - handle conditions here
+        entry = self.find_fqn(name)
+        while entry and type(entry) in (str, unicode):
+            entry = self.find_fqn(entry)
+        return entry
+
+    def add(self, name, entity):
+        """ Adds a new child entity. """
+        assert name and name not in self.entity_map, "Child entity '%s' already exists" % name
+        # Take ownership of the entity
+        entity.parent = self
+        self.entity_map[name] = entity
+        self.child_entities.append(entity)
+
+    def get(self, fqn_or_parts):
+        """ Given a list of key path parts, tries to resolve the descendant entity that matchies this part prefix. """
+        parts = fqn_or_parts
+        if type(fqn_or_parts) in (unicode, str):
+            parts = fqn_or_parts.split(".")
+        curr = self
+        for part in parts:
+            if part not in curr.entity_map:
+                return None
+            curr = curr.entity_map[part]
+        return curr
+
+    @property
+    def name(self): return self._name
+
+    @property
+    def parent(self): return self._parent
+
+    def __json__(self, **kwargs):
+        out = {}
+        if self.fqn:
+            out["fqn"] = self.fqn
+        return out
+
+    def ensure_module(self, fqn):
+        """ Ensures that the module given by FQN exists from this module and is a Module object. """
+        parts = fqn.split(".")
+        curr = self
+        total = None
+        for part in parts:
+            if not total: total = part
+            else: total = total + "." + part
+            if part not in curr.entity_map:
+                curr.add(part, Module(total, curr))
+            curr = curr.get(part)
+            assert type(curr) is Module
+        return curr
+
+    def debug_show(self, level = 0):
+        print ("  " * (level)) + "Module:"
+        print ("  " * (level + 1)) + "Children:"
+        for key,value in self.entity_map.iteritems():
+            print ("  " * (level + 2)) + ("%s: %s" % (key, value))
+        print ("  " * (level + 1)) + "Aliases:"
+        for key,value in self.aliases.iteritems():
+            print ("  " * (level + 2)) + ("%s: %s" % (key, value))

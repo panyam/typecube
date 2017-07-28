@@ -4,8 +4,6 @@ import pprint
 import cStringIO
 from collections import defaultdict
 
-AS_JSON = True
-
 class Annotatable(object):
     def __init__(self, annotations = None, docs = ""):
         if annotations is not None:
@@ -14,11 +12,11 @@ class Annotatable(object):
         self.docs = docs or ""
 
     def set_annotations(self, annotations):
-        self.annotations = annotations
+        self._annotations = annotations
         return self
 
     def set_docs(self, docs):
-        self.docs = docs
+        self._docs = docs
         return self
 
     @property
