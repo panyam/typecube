@@ -55,21 +55,13 @@ class Expr(NameResolver, Annotatable):
             self.parent_changed(oldvalue)
 
     def validate_parent(self, value):
-        if self._parent is not None and value != self._parent:
-            set_trace()
+        if self._parent is not None and value != self._parent: set_trace()
         return True
 
     def parent_changed(self, oldvalue):
         pass
 
     #########
-
-    def resolve_name(self, name, condition = None):
-        if self.parent is None:
-            set_trace()
-            assert self.parent is not None, "Parent of %s is None" % type(self)
-        return NameResolver.resolve_name(self, name, condition)
-
     def _resolve_name(self, name, condition = None):
         return None
 
@@ -95,12 +87,11 @@ class Var(Expr):
         self.name = name
 
     def beta_reduce(self, bindings):
-        if name in bindings:
-            return bindings[name].deepcopy()
+        if self.name in bindings:
+            return bindings[self.name].clone()
         return self
 
-    @property
-    def deepcopy(self):
+    def clone(self):
         return Var(self.name)
 
     def __repr__(self):
@@ -336,8 +327,7 @@ class AtomicType(Type):
     def beta_reduce(self, bindings):
         return self
 
-    @property
-    def deepcopy(self):
+    def clone(self):
         return AtomicType(self.fqn, None, self.annotations, self.docs)
 
     def validate_parent(self, value):
@@ -350,8 +340,7 @@ class AliasType(Type):
         self.target_type = target_type
         assert self.target_type.isany(Type)
 
-    @property
-    def deepcopy(self):
+    def clone(self):
         return make_alias(self.fqn, self.target_type, None, self.annotations, self.docs)
 
 class ContainerType(Type):
@@ -372,18 +361,16 @@ class ProductType(ContainerType):
         ContainerType.__init__(self, fqn, typeargs, parent)
         self.tag = tag
 
-    @property
-    def deepcopy(self):
-        return ProductType(self.tag, self.fqn, [ta.deepcopy for ta in self.args], None, self.annotations, self.docs)
+    def clone(self):
+        return ProductType(self.tag, self.fqn, [ta.clone() for ta in self.args], None)
 
 class SumType(ContainerType):
     def __init__(self, tag, fqn, typeargs, parent):
         ContainerType.__init__(self, fqn, typeargs, parent)
         self.tag = tag
 
-    @property
-    def deepcopy(self):
-        return SumType(self.tag, self.fqn, [ta.deepcopy for ta in self.args], None, self.annotations, self.docs)
+    def clone(self):
+        return SumType(self.tag, self.fqn, [ta.clone() for ta in self.args], None)
 
 class FunType(Type):
     """ Represents function types.
@@ -407,8 +394,8 @@ class FunType(Type):
 class TypeRef(Type):
     def beta_reduce(self, bindings):
         if self.name in bindings:
-            return bindings[self.fqn].deepcopy
-        return self.deepcopy
+            return bindings[self.fqn].clone()
+        return self.clone()
 
     @property
     def final_type(self):
@@ -417,8 +404,7 @@ class TypeRef(Type):
             curr = curr.resolve()
         return curr
 
-    @property
-    def deepcopy(self):
+    def clone(self):
         return make_ref(self.fqn, None, self.annotations, self.docs)
 
     def _resolve(self):
@@ -430,7 +416,7 @@ class Quant(Fun):
     Unlike normal functions (abstractions), which take terms/expressions as arguments, a Quantification takes types arguments
     and returns an expression with the arguments substituted with the types.
     """
-    def __init__(self, fqn, params, expr, parent
+    def __init__(self, fqn, params, expr, parent):
         fun_type = make_fun_type(None, [TypeArg(p, KindType) for p in params], TypeArg(None, KindType), self)
         Fun.__init__(self, fqn, expr, fun_type, parent)
 
@@ -464,9 +450,8 @@ class TypeApp(Type, App):
         Type.__init__(self, None, parent)
         assert(all(t.isany(Type) for t in args)), "All type args in a TypeApp must be Type sub classes"
 
-    @property
-    def deepcopy(self):
-        return TypeApp(self.expr.deepcopy, [arg.deepcopy for arg in self.args], None, self.annotations, self.docs)
+    def clone(self):
+        return TypeApp(self.expr.clone(), [arg.clone() for arg in self.args], None, self.annotations, self.docs)
 
     def resolve_function(self):
         fun, args = App.resolve_function(self)
@@ -486,9 +471,8 @@ class TypeArg(Expr):
         if not self.expr.parent:
             self.expr.parent = self
 
-    @property
-    def deepcopy(self):
-        return TypeArg(self.name, self.expr.deepcopy, self.is_optional, self.default_value, self.annotations, self.docs)
+    def clone(self):
+        return TypeArg(self.name, self.expr.clone(), self.is_optional, self.default_value, self.annotations, self.docs)
 
     def beta_reduce(self, bindings):
         return TypeArg(self.name, self.expr.beta_reduce(bindings), self.is_optional, self.default_value, self.annotations, self.docs)

@@ -44,8 +44,8 @@ class Index(Expr):
         self.expr.parent = self
 
     @property
-    def deepcopy(self):
-        return Index(self.expr.deepcopy, self.key)
+    def clone(self):
+        return Index(self.expr.clone(), self.key)
 
     def _resolve(self):
         return Index(self.expr.resolve(), self.key)
@@ -62,7 +62,7 @@ class Assignment(Expr):
         self.target.parent = self
 
     def beta_reduce(self, bindings):
-        return Assignment(self.target.deepcopy, self.expr.beta_reduce(bindings))
+        return Assignment(self.target.clone(), self.expr.beta_reduce(bindings))
 
     def _resolve(self):
         return self
