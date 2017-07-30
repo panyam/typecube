@@ -8,10 +8,14 @@ from typecube.annotations import Annotatable
 
 class NameResolver(object):
     def resolve_name(self, name, condition = None):
-        """ Tries to resolve a name in this expression. """
-        value = self._resolve_name(name, condition)
+        """ Tries to resolve a name in this expression. 
+        This returns the value of a name (the associated expression)
+        as well as the parent object that is the holder/owner of this
+        name.
+        """
+        parent,value = self._resolve_name(name, condition)
         if value and (condition is None or condition(value)):
-            return value
+            return parent,value
         if self.parent:     # Try the parent expression
             return self.parent.resolve_name(name, condition)
         raise errors.TLException("Unable to resolve name: %s" % name)
@@ -23,6 +27,30 @@ class Expr(NameResolver, Annotatable):
     def __init__(self, parent = None):
         Annotatable.__init__(self)
         self._parent = parent
+        self._free_variables = None
+
+    def reduce(self):
+        tmp = None
+        curr, reduced = self.reduce_once()
+        success = reduced
+        while reduced:
+            tmp = curr
+            curr, reduced = curr.reduce_once()
+            success = success or reduced
+        return curr,success
+
+    def reduce_once(self):
+        return self, False
+
+    @property
+    def free_variables(self):
+        if self._free_variables is None:
+            self._free_variables = self.eval_free_variables()
+        return self._free_variables
+
+    def eval_free_variables(self):
+        set_trace()
+        assert False, "Not implemented"
 
     def isany(self, cls):
         return isinstance(self, cls)
@@ -63,21 +91,7 @@ class Expr(NameResolver, Annotatable):
 
     #########
     def _resolve_name(self, name, condition = None):
-        return None
-
-    def resolve(self):
-        # TODO: Cache resolved value
-        return self._resolve()
-
-    def _resolve(self):
-        """ This method resolves a type expr to a type object. 
-        The resolver is used to get bindings for names used in this expr.
-        
-        Returns the resolved expression
-        """
-        set_trace()
-        assert False, "Not Implemented"
-        return self
+        return None,None
 
 class Var(Expr):
     """ An occurence of a name that can be bound to a value, a field or a type. """
@@ -85,11 +99,28 @@ class Var(Expr):
         Expr.__init__(self)
         assert type(name) in (str, unicode)
         self.name = name
+        # The depth (or static depth or the de bruijn index) is the distance 
+        # between the use of the variable and where it is defined.  
+        # eg a static depth of 1 => definition within the immediate parent
+        # -1 => undefined and needs to be calculated
+        # 0/MAXINT => free variable
+        self.depth = -1
 
-    def beta_reduce(self, bindings):
+        # The offset is the variable # within the parent where it is defined. 
+        # This is only valid if the depth == 1
+        self.offset = -1
+
+    def substitute(self, bindings):
         if self.name in bindings:
-            return bindings[self.name].clone()
-        return self
+            return bindings[self.name].clone(), True
+        return Var(self.name), False
+
+    def parent_changed(self, oldvalue):
+        self.depth = -1
+        self.offset = -1
+
+    def eval_free_variables(self):
+        return {self.name}
 
     def clone(self):
         return Var(self.name)
@@ -97,25 +128,121 @@ class Var(Expr):
     def __repr__(self):
         return "<Var - ID: 0x%x, Value: %s>" % (id(self), self.name)
 
-    def _resolve(self):
-        """
-        Returns the actual entry pointed to by the "first" part of the field path.
-        """
-        target = self.resolve_name(self.name)
-        if target is None:
-            assert target is not None, "Could not resolve '%s'" % first
-        return target
+class Type(Expr):
+    """ Base Type interface. """
+    def __init__(self, fqn, parent):
+        Expr.__init__(self, parent)
+        self.fqn = fqn
+
+    @property
+    def name(self):
+        return self.fqn.split(".")[-1]
 
 class Abs(Expr):
     """ Base of all abstractions/function expressions. """
-    def __init__(self, fqn, expr, parent, fun_type):
+    def __init__(self, params, expr, fqn = None, parent = None, fun_type = None):
         Expr.__init__(self, parent)
         self.fqn = fqn
         self._expr = None
         self.expr = expr
+        if type(params) in (str, unicode): params = [params]
+        self.params = params
+        self.return_param = "dest"
         self.fun_type = fun_type
         if self.fun_type:
             self.fun_type.parent = self
+        self.temp_variables = {}
+
+    def generate_names(self, starting_name):
+        for i in xrange(1000000):
+            yield "%s_%d" % (starting_name, i)
+
+    def rename_params(self, **param_bindings):
+        """ Renames bound parameters in this Abstraction based on the mappings given in the "param_bindings" map. """
+        for i,p in enumerate(self.params):
+            if p in param_binding:
+                self.params[i] = param_bindings[p]
+        self.return_param = param_bindings.get(self.return_param, self.return_param)
+        for k,v in param_bindings.iteritems():
+            if k in self.temp_variables:
+                value = self.temp_variables[k]
+                del self.temp_variables[k]
+                self.temp_variables[v] = value
+
+    def bound_params(self):
+        return set(self.params).union([self.return_param]).union(self.temp_variables.keys())
+
+    def is_bound(self, param):
+        return param in self.params or param == self.return_param or param in self.temp_variables
+
+    def substitute(self, bindings):
+        # We need to do substitutions in 2 places
+        # 1. The function types (with nothing removed from the bindings)
+        # 2. The expr with the bindings - argnames
+
+        # First filter out bindings that are bound parameters
+        # No point changing \x:f(x) to \y:f(y)
+        new_bindings = {}
+        sub_free_vars = set()
+        for k,v in (bindings or {}).iteritems():
+            # Ignore bound variables
+            if self.is_bound(k): continue
+            new_bindings[k] = v
+            sub_free_vars = sub_free_vars.union(v.free_variables)
+
+        # No bindings - nothing to be done
+        if not new_bindings: return self, False
+
+        # Remove all variables from the bindings that are bound to us
+        new_fun_type,fun_reduced = None,False
+        if self.fun_type:
+            new_fun_type,fun_reduced = self.fun_type.substitute(bindings)
+
+        if not self.expr:
+            # No expression, may be nothing to do
+            if not fun_reduced:
+                return self, False
+            return self.__class__(params, None, self.fqn, parent, new_fun_type), fun_reduced
+
+        # Alpha renaming to ensure capture free subs is possible
+        param_bindings = self.eval_param_renames(sub_free_vars)
+        this, reduced = self.substitute(param_bindings)
+
+        # Then the actual substitutions
+        new_expr,expr_reduced = this.expr.substitute(new_bindings)
+        out = self.__class__(this.params, new_expr, this.fqn, this.parent)
+        out.temp_variables = this.temp_variables
+        out.fun_type = new_fun_type
+        return out, True
+
+    def eval_param_renames(self, freevars):
+        """ Return parameter renamings required for a capture free substitution.
+        
+        Given a bunch of free variables, returns any renamings required off this
+        abstraction's bound variables such that the renamed values do not fall in the set of free variables of this expression or the free variables provided.
+        """
+        our_free_vars = self.free_variables
+        param_bindings = {}
+        for y in self.bound_params():
+            if y in freevars:
+                for nextname in self.generate_names(y):
+                    if nextname not in freevars and nextname not in our_free_vars:
+                        param_bindings[y] = nextname
+                        break
+                assert param_bindings[y], "Param '%s' could not be renamed" % y
+        return param_bindings
+
+    def eval_free_variables(self):
+        out = self.expr.free_variables
+        for param in self.params:
+            if param in out:
+                out.remove(param)
+        if self.return_param in out:
+            out.remove(return_param)
+        for param in self.temp_variables:
+            if param in out:
+                out.remove(param)
+        return out
 
     @property
     def expr(self):
@@ -126,7 +253,7 @@ class Abs(Expr):
         if self._expr:
             # Set old expr's parent to None
             # TODO - This has to be forced
-            self._expr.parent = None
+            self._expr.clear_parent()
         self._expr = value
         if value:
             value.parent = self
@@ -141,27 +268,90 @@ class Abs(Expr):
     def apply(self, args):
         assert self.expr is not None
         bindings = dict(zip(self.params, args))
-        out = self.expr.beta_reduce(bindings)
+        out, reduced = self.expr.substitute(bindings)
         out.parent = self.parent
         return out
 
     def _resolve_name(self, name, condition = None):
         """ Try to resolve a name to a local, source or destination variable. """
         # Check source types
-        fun_type = self.fun_type
-        for arg in self.fun_type.source_typeargs:
-            if arg.name == name:
-                if condition is None or condition(arg.expr):
-                    if arg.expr == KindType:
+        for index,param in enumerate(self.params):
+            if param == name:
+                typeexpr = self.fun_type.source_types
+                if condition is None or condition(typeexpr):
+                    if typeexpr == KindType:
                         # TODO: *something?*, perhaps return param name as a type?
                         # return make_atomic_type(arg.name)
                         # set_trace()
                         pass
-                    return arg.expr
+                    return self,typeexpr
 
-        # Check if this is the "output" arg
-        if fun_type.return_typearg and fun_type.return_typearg.name == name:
-            return fun_type.return_typearg.expr
+        if param == self.return_param:
+            # Check if this is the "output" arg
+            return fun_type.return_type
+
+        if self.is_temp_variable(name):
+            # Check local variables
+            return self,self.temp_var_type(name)
+
+    def is_temp_variable(self, varname):
+        return varname in self.temp_variables
+
+    def temp_var_type(self, varname):
+        return self.temp_variables[str(varname)]
+
+    def register_temp_var(self, varname, vartype = None):
+        assert type(varname) in (str, unicode)
+        if varname in self.params:
+            raise TLException("Duplicate temporary variable '%s'.  Same as function arguments." % varname)
+        elif varname == self.return_param:
+            raise TLException("Duplicate temporary variable '%s'.  Same as function return argument name." % varname)
+        elif self.is_temp_variable(varname) and self.temp_variables[varname] is not None:
+            raise TLException("Duplicate temporary variable declared: '%s'" % varname)
+        self.temp_variables[varname] = vartype
+
+class Fun(Abs):
+    """ An abstraction over expressions.  """
+    def _reduce(self):
+        new_fun_type = self.fun_type.resolve()
+        resolved_expr = None if not self.expr else self.expr.resolve()
+        if new_fun_type == self.fun_type and resolved_expr == self.expr:
+            return self
+        out = Fun(self.params, resolved_expr, self.fqn, self.parent, new_fun_type)
+        return out
+
+class Quant(Abs):
+    """ A quantification or a generic function.
+    
+    Unlike normal functions (abstractions), which take terms/expressions as arguments, a Quantification takes types arguments
+    and returns an expression with the arguments substituted with the types.
+    """
+    def __init__(self, params, expr, fqn = None, parent = None):
+        fun_type = make_fun_type(None, [KindType] * len(params), KindType, self)
+        Abs.__init__(self, params, expr, fqn, parent, fun_type)
+
+    def _reduce(self):
+        resolved_expr = None if not self.expr else self.expr.resolve()
+        if resolved_expr == self.expr:
+            return self
+        out = Quant(self.params, resolved_expr, self.fqn, self.parent, self.fun_type)
+        return out
+
+class TypeOp(Abs):
+    """ Type operators are "functions" over types.  
+    They take proper types as arguments and return new types.  
+    Type operators are NOT types, but just expressions (abstractions) that return types. """
+    def __init__(self, params, expr, fqn = None, parent = None):
+        fun_type = make_fun_type(None, [KindType] * len(params), KindType, self)
+        Abs.__init__(self, params, expr, fqn, parent, fun_type)
+        assert not expr or expr.isany(Type)
+
+    def _reduce(self):
+        resolved_expr = None if not self.expr else self.expr.resolve()
+        if resolved_expr == self.expr:
+            return self
+        out = Quant(self.params, resolved_expr, self.fqn, self.parent, self.fun_type)
+        return out
 
 class App(Expr):
     """ Base of all application expressions. """
@@ -175,156 +365,71 @@ class App(Expr):
         self.args = args
         self.expr.parent = self
         for arg in self.args:
+            if not isinstance(arg, Expr): set_trace()
             arg.parent = self
 
-    def __repr__(self):
-        return "<%s(0x%x) Expr = %s, Args = (%s)>" % (self.__class__.name, id(self), repr(self.expr), ", ".join(map(repr, self.args)))
-
-    def resolve_function(self):
-        function = self.expr.resolve()
-        if not function:
-            raise errors.TLException("Fun '%s' is undefined" % (self.expr))
-        while function.isany(Type) and type.is_alias:
-            assert len(function.args) == 1, "Typeref cannot have more than one child argument"
-            function = function.args[0].expr.resolve()
-        if not function.isany(Abs):
-            set_trace()
-            raise errors.TLException("'%s' is not an Abstraction" % (self.expr))
-        arg_values = [arg.resolve() for arg in self.args]
-
-        # Wont do currying for now
-        if len(arg_values) != len(function.fun_type.source_typeargs):
-            raise errors.TLException("Fun '%s' takes %d arguments, but encountered %d.  Currying or var args NOT YET supported." %
-                                            (function.name, len(function.source_typeargs), len(self.args)))
-        return function, arg_values
-
-    def beta_reduce(self, bindings):
-        newfun = self.expr.beta_reduce(bindings)
-        newargs = [arg.beta_reduce(bindings) for arg in self.args]
-        return make_type_app(newfun, newargs, None, self.annotations, self.docs)
-
-    def _resolve(self):
-        """ Resolves a type application. 
-        This will apply the arguments to the function expression.
-
-        TODO: Discuss variable capture
-        """
-        fun,args = self.resolve_function()
-        if fun.is_external:
-            # Cannot apply for external types so just return ourselves 
-            # as no further application is possible
-            return self
-        return fun.apply(args)
-
-class Fun(Abs):
-    """ An abstraction over expressions.  """
-    def __init__(self, fqn, expr, fun_type, parent):
-        Abs.__init__(self, fqn, expr, parent, fun_type)
-        self.temp_variables = {}
-
-    @property
-    def params(self): return [ta.name for ta in self.fun_type.source_typeargs]
-
-    def beta_reduce(self, bindings):
-        # We need to do substitutions in 2 places
-        # 1. The function types (with nothing removed from the bindings)
-        # 2. The expr with the bindings - argnames
-        new_fun_type = self.fun_type.beta_reduce(bindings)
-        new_expr = None
-        if self.expr:
-            new_bindings = {}
-            params = self.params
-            for k,v in (bindings or {}).iteritems():
-                if k != self.fun_type.return_typearg.name and k not in params:
-                    new_bindings[k] = v
-            self.expr.beta_reduce(new_bindings)
-        return Fun(self.fqn, new_expr, parent, new_fun_type, self.annotations, self.docs)
-
-    def _resolve_name(self, name, condition = None):
-        value = Abs._resolve_name(self, name, condition)
-        if value: return value
-        elif self.is_temp_variable(name):
-            # Check local variables
-            return self.temp_var_type(name)
-
-    def _resolve(self):
-        """
-        The main resolver method.  This should take care of the following:
-
-            1. Ensure field paths are correct
-            2. All exprs have their evaluated types set
-        """
-        new_fun_type = self.fun_type.resolve()
-        resolved_expr = None if not self.expr else self.expr.resolve()
-        if new_fun_type == self.fun_type and resolved_expr == self.expr:
-            return self
-        out = Fun(self.fqn, resolved_expr, new_fun_type, self.parent, self.annotations, self.docs)
+    def eval_free_variables(self):
+        out = set(self.expr.free_variables)
+        for expr in self.exprs:
+            out = out.union(expr.free_variables)
         return out
 
-    def is_temp_variable(self, varname):
-        return varname in self.temp_variables
+    def __repr__(self):
+        return "<%s(0x%x) Expr = %s, Args = (%s)>" % (self.__class__.__name__, id(self), repr(self.expr), ", ".join(map(repr, self.args)))
 
-    def temp_var_type(self, varname):
-        return self.temp_variables[str(varname)]
+    def clone(self):
+        return self.__class__(self.expr.clone(), [arg.clone() for arg in self.args], None)
 
-    def register_temp_var(self, varname, vartype = None):
-        assert type(varname) in (str, unicode)
-        if varname in (x.name for x in self.fun_type.source_typeargs):
-            raise TLException("Duplicate temporary variable '%s'.  Same as function arguments." % varname)
-        elif self.fun_type.return_typearg and varname == self.fun_type.return_typearg.name:
-            raise TLException("Duplicate temporary variable '%s'.  Same as function return argument name." % varname)
-        elif self.is_temp_variable(varname) and self.temp_variables[varname] is not None:
-            raise TLException("Duplicate temporary variable declared: '%s'" % varname)
-        self.temp_variables[varname] = vartype
+    def reduce_once(self):
+        fun, fun_reduced = self.expr.reduce()
+        args,args_reduced = map(list, zip(*[a.reduce() for a in self.args]))
+        if fun.isany(Abs) and not fun.is_external:
+            # we are good, we can apply
+            return fun.apply(args), True
+        elif any([fun_reduced] + args_reduced):
+            # Atleast one of fun or an arg was reducible so mark as progress
+            return self.__class__(fun, args), True
+        else:
+            # Nothing could be reduced so return ourselves
+            return self, False
+
+    def substitute(self, bindings):
+        fun,fun_reduced = self.expr.substitute(bindings)
+        args,args_reduced = map(list, zip(*[arg.substitute(bindings) for arg in self.args]))
+        reduced = fun_reduced or any(args_reduced)
+        return self.__class__(fun, args), reduced
 
 class FunApp(App):
-    """ Super class of all applications """
-    def __init__(self, expr, args = None):
+    pass
+
+class QuantApp(App):
+    """ Application of a quantification to type expressions. """
+    def resolve_function(self):
+        fun, args = App.resolve_function(self)
+        if not fun.isa(Quant):
+            raise errors.TLException("'%s' is not a type operator" % typefun)
+        return fun,args
+
+class TypeApp(Type, App):
+    """ Application of a type operator. 
+    Unlike quantifications or functions, this returns a type when types are 
+    passed as arguments.
+    """
+    def __init__(self, expr, args, parent = None):
+        if type(expr) in (str, unicode):
+            expr = make_ref(expr)
         App.__init__(self, expr, args)
-        self.args = args
+        Type.__init__(self, None, parent)
+        assert(all(t.isany(Type) for t in args)), "All type args in a TypeApp must be Type sub classes"
 
-    def __repr__(self):
-        return "<FunApp(0x%x) Expr = %s, Args = (%s)>" % (id(self), repr(self.expr), ", ".join(map(repr, self.args)))
-
-    def _resolve(self):
-        """
-        Processes an exprs and resolves name bindings and creating new local vars 
-        in the process if required.
-        """
-        # First resolve the expr to get the source function
-        # Here we need to decide if the function needs to be "duplicated" for each different type
-        # This is where type re-ification is important - both at buildtime and runtime
-        fun, args = self.resolve_function()
-
-        # TODO - check arg types match
-        if fun != self.expr or any(x != y for x,y in zip(args, self.args)):
-            # Only return a new expr if any thing has changed
-            return FunApp(fun, args)
-        return self
-
-class Type(Expr):
-    def __init__(self, fqn, parent):
-        """
-        Creates a new type function.  Type functions are responsible for creating concrete type instances
-        or other (curried) type functions.
-
-        Params:
-            fqn             FQN of the type.
-            parent          A reference to the parent container entity of this type.
-            annotations     Annotations applied to the type.
-            docs            Documentation string for the type.
-        """
-        Expr.__init__(self, parent)
-        # tag can indicate a further specialization of the type - eg "record", "enum" etc
-        self.tag = None
-        self.fqn = fqn
-
-    @property
-    def name(self):
-        return self.fqn.split(".")[-1]
+    def resolve_function(self):
+        fun, args = App.resolve_function(self)
+        if not fun.isa(TypeOp):
+            raise errors.TLException("'%s' is not a type operator" % typefun)
+        return fun,args
 
 class AtomicType(Type):
-    def beta_reduce(self, bindings):
+    def substitute(self, bindings):
         return self
 
     def clone(self):
@@ -344,55 +449,55 @@ class AliasType(Type):
         return make_alias(self.fqn, self.target_type, None, self.annotations, self.docs)
 
 class ContainerType(Type):
-    def __init__(self, fqn, typeargs, parent):
+    def __init__(self, fqn, typeexprs, params, parent):
         Type.__init__(self, fqn, parent)
-        self.args = typeargs
-        for arg in self.args:
-            arg.parent = self
+        self.typeexprs = typeexprs
+        for typeexpr in self.typeexprs:
+            typeexpr.parent = self
+        self.is_labelled = False
+        self.params = params or []
+        self.param_indices = dict(enumerate(params or []))
+        if params:
+            self.is_labelled = True
 
-    def beta_reduce(self, bindings):
-        typeargs = [TypeArg(ta.name, ta.expr.beta_reduce(bindings),
-                            ta.is_optional, ta.default_value, ta.annotations, ta.docs) for ta in self.args]
-        return self.__class__(self.tag, self.fqn, typeargs, parent, self.annotations, self.docs)
+    def type_for_param(self, param):
+        return self.typeexprs[self.param_indices[param]]
 
+    def substitute(self, bindings):
+        typeexprs = [typeexpr.substitute(bindings) for texpr in self.typeexprs]
+        return self.__class__(self.tag, self.fqn, typeexprs, self.params, parent)
 
 class ProductType(ContainerType):
-    def __init__(self, tag, fqn, typeargs, parent):
-        ContainerType.__init__(self, fqn, typeargs, parent)
+    def __init__(self, tag, fqn, typeexprs, params, parent):
+        ContainerType.__init__(self, fqn, typeexprs, params, parent)
         self.tag = tag
-
-    def clone(self):
-        return ProductType(self.tag, self.fqn, [ta.clone() for ta in self.args], None)
 
 class SumType(ContainerType):
-    def __init__(self, tag, fqn, typeargs, parent):
-        ContainerType.__init__(self, fqn, typeargs, parent)
+    def __init__(self, tag, fqn, typeexprs, params, parent):
+        ContainerType.__init__(self, fqn, typeexprs, params, parent)
         self.tag = tag
-
-    def clone(self):
-        return SumType(self.tag, self.fqn, [ta.clone() for ta in self.args], None)
 
 class FunType(Type):
     """ Represents function types.
     Note that function types do not reference the "names" of the function parameters.
     """
-    def __init__(self, fqn, source_typeargs, return_typearg, parent):
+    def __init__(self, fqn, source_types, return_type, parent):
         Type.__init__(self, fqn, parent)
-        self.return_typearg = return_typearg
-        self.source_typeargs = source_typeargs
-        for arg in self.source_typeargs:
-            if not arg.parent:
-                arg.parent = self
-        if self.return_typearg and not self.return_typearg.parent:
-            self.return_typearg.parent = self
+        self.return_type = return_type
+        self.source_types = source_types
+        for expr in self.source_types:
+            if not expr.parent:
+                expr.parent = self
+        if self.return_type and not self.return_type.parent:
+            self.return_type.parent = self
 
-    def beta_reduce(self, bindings):
-        new_source_typeargs = [st.beta_reduce(bindings) for st in self.source_typeargs]
-        new_return_typearg = None if not self.return_typearg else self.return_typearg.beta_reduce(bindings)
-        return FunType(self.fqn, new_source_typeargs, new_return_typearg, None, self.annotations, self.docs)
+    def substitute(self, bindings):
+        new_source_types = [st.substitute(bindings) for st in self.source_types]
+        new_return_type = None if not self.return_type else self.return_type.substitute(bindings)
+        return FunType(self.fqn, new_source_types, new_return_type, None)
 
 class TypeRef(Type):
-    def beta_reduce(self, bindings):
+    def substitute(self, bindings):
         if self.name in bindings:
             return bindings[self.fqn].clone()
         return self.clone()
@@ -407,168 +512,20 @@ class TypeRef(Type):
     def clone(self):
         return make_ref(self.fqn, None, self.annotations, self.docs)
 
-    def _resolve(self):
+    def _reduce(self):
         return self.resolve_name(self.fqn)
-
-class Quant(Fun):
-    """ A quantification or a generic function.
-    
-    Unlike normal functions (abstractions), which take terms/expressions as arguments, a Quantification takes types arguments
-    and returns an expression with the arguments substituted with the types.
-    """
-    def __init__(self, fqn, params, expr, parent):
-        fun_type = make_fun_type(None, [TypeArg(p, KindType) for p in params], TypeArg(None, KindType), self)
-        Fun.__init__(self, fqn, expr, fun_type, parent)
-
-class QuantApp(App):
-    """ Application of a quantification to type expressions. """
-    def __init__(self, expr, args = None):
-        App.__init__(self, expr, args)
-        self.args = args
-
-    def resolve_function(self):
-        fun, args = App.resolve_function(self)
-        if not fun.isa(Quant):
-            raise errors.TLException("'%s' is not a type operator" % typefun)
-        return fun,args
-
-class TypeOp(Fun):
-    """ Type operators are "functions" over types.  They take proper types as arguments and return new types.  
-    Type operators are NOT types, but just expressions (abstractions) that return types. """
-    def __init__(self, fqn, params, expr, parent):
-        fun_type = make_fun_type(None, [TypeArg(p, KindType) for p in params], TypeArg(None, KindType), self)
-        Fun.__init__(self, fqn, expr, fun_type, parent)
-        assert not expr or expr.isany(Type)
-
-class TypeApp(Type, App):
-    """ Application of a type operator. Unlike quantifications or functions, 
-    this returns a type when types are passed as arguments. """
-    def __init__(self, expr, args, parent):
-        if type(expr) in (str, unicode):
-            expr = make_ref(expr)
-        App.__init__(self, expr, args)
-        Type.__init__(self, None, parent)
-        assert(all(t.isany(Type) for t in args)), "All type args in a TypeApp must be Type sub classes"
-
-    def clone(self):
-        return TypeApp(self.expr.clone(), [arg.clone() for arg in self.args], None, self.annotations, self.docs)
-
-    def resolve_function(self):
-        fun, args = App.resolve_function(self)
-        if not fun.isa(TypeOp):
-            raise errors.TLException("'%s' is not a type operator" % typefun)
-        return fun,args
-
-class TypeArg(Expr):
-    """ A type argument is a child of a given type.  Akin to a member/field of a type.  """
-    def __init__(self, name, expr, is_optional = False, default_value = None):
-        Expr.__init__(self, None)
-        self.name = name
-        self.is_optional = is_optional
-        self.default_value = default_value or None
-        assert expr.isany(Type)
-        self.expr = expr
-        if not self.expr.parent:
-            self.expr.parent = self
-
-    def clone(self):
-        return TypeArg(self.name, self.expr.clone(), self.is_optional, self.default_value, self.annotations, self.docs)
-
-    def beta_reduce(self, bindings):
-        return TypeArg(self.name, self.expr.beta_reduce(bindings), self.is_optional, self.default_value, self.annotations, self.docs)
-
-    def _resolve(self):
-        out = self
-        if self.expr is None:
-            return self
-        new_expr = self.expr.resolve()
-        if new_expr != self.expr:
-            out =  TypeArg(self.name, new_expr, self.is_optional, self.default_value)
-            out.set_annotations(self.annotations).set_docs(self.docs)
-        return out
-
-    def unwrap_with_field_path(self, full_field_path):
-        starting_var, field_path = full_field_path.pop()
-        curr_typearg = self
-        curr_path = curr_field_name = starting_var
-        yield curr_field_name, curr_path, curr_typearg
-        while field_path.length > 0:
-            next_field_name, tail_path = field_path.pop()
-            next_path = curr_path + "/" + next_field_name
-            next_typearg = curr_typearg.expr.resolve().args.withname(next_field_name)
-            curr_field_name, curr_path, field_path = next_field_name, next_path, tail_path
-            yield curr_field_name, curr_path, curr_typearg
-
-def validate_typearg(arg):
-    if isinstance(arg, TypeArg):
-        return arg
-    elif issubclass(arg.__class__, Expr):
-        return TypeArg(None, arg)
-    elif type(arg) in (str, unicode):
-        return TypeArg(None, Var(arg))
-    else:
-        raise errors.TLException("Argument must be a TypeArg, Expr or a string. Found: '%s'" % type(arg))
-
-class TypeArgList(object):
-    """ A list of type args for a particular type container. """
-    def __init__(self, typeargs):
-        self._typeargs = []
-        for typearg in typeargs or []:
-            self.add(typearg)
-
-    def equals(self, another):
-        return len(self._typeargs) == len(self._typeargs) and all(x.equals(y) for x,y in izip(self._typeargs, another._typeargs))
-
-    def __getitem__(self, slice):
-        return self._typeargs.__getitem__(slice)
-
-    def __iter__(self): return iter(self._typeargs)
-
-    def __len__(self): return len(self._typeargs)
-
-    def __repr__(self):
-        return repr(self._typeargs)
-
-    @property
-    def count(self): return len(self._typeargs)
-
-    def index_for(self, name):
-        for i,arg in enumerate(self._typeargs):
-            if arg.name == name:
-                return i
-        return -1
-
-    def withname(self, name):
-        return self.atindex(self.index_for(name))
-
-    def atindex(self, index):
-        return None if index < 0 else self._typeargs[index]
-
-    def contains(self, name):
-        return self.index_for(name) >= 0
-
-    def add(self, arg):
-        """
-        Add an argument type.
-        """
-        arg = validate_typearg(arg)
-        if arg.name:
-            index = self.index_for(arg.name)
-            if index >= 0:
-                raise errors.TLException("Child type by the given name '%s' already exists" % arg.name)
-        self._typeargs.append(arg)
 
 def make_atomic_type(fqn, parent = None):
     return AtomicType(fqn, parent)
 
-def make_product_type(tag, fqn, typeargs, parent = None):
-    return ProductType(tag, fqn, typeargs, parent)
+def make_product_type(tag, fqn, types, params, parent = None):
+    return ProductType(tag, fqn, types, params, parent)
 
-def make_sum_type(tag, fqn, typeargs, parent = None):
-    return SumType(tag, fqn, typeargs, parent)
+def make_sum_type(tag, fqn, types, params, parent = None):
+    return SumType(tag, fqn, types, params, parent)
 
-def make_fun_type(fqn, source_typeargs, return_typearg, parent = None):
-    return FunType(fqn, source_typeargs, return_typearg, parent)
+def make_fun_type(fqn, source_types, return_type, parent = None):
+    return FunType(fqn, source_types, return_type, parent)
 
 def make_alias(fqn, target_type, parent = None):
     return AliasType(fqn, target_type, parent)

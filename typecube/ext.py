@@ -30,7 +30,7 @@ class NewExpr(Expr):
         self.arg_values = arg_values or {}
         for expr in arg_values.iteritems(): expr.parent = self
 
-    def _resolve(self):
+    def _reduce(self):
         resolved_objtype = self.objtype.resolve()
         resolved_args = {key: value.resolve() for key,value in self.arg_values.iteritems()}
         return self
@@ -47,7 +47,7 @@ class Index(Expr):
     def clone(self):
         return Index(self.expr.clone(), self.key)
 
-    def _resolve(self):
+    def _reduce(self):
         return Index(self.expr.resolve(), self.key)
 
     def beta_reduce(self, bindings):
@@ -64,7 +64,7 @@ class Assignment(Expr):
     def beta_reduce(self, bindings):
         return Assignment(self.target.clone(), self.expr.beta_reduce(bindings))
 
-    def _resolve(self):
+    def _reduce(self):
         return self
 
 class Literal(Expr):
@@ -109,7 +109,7 @@ class ExprList(Expr):
         else:
             self.add(another)
 
-    def _resolve(self):
+    def _reduce(self):
         resolved_exprs = [expr.resolve() for expr in self.children]
         if any(x != y for x,y in zip(self.children, resolved_exprs)):
             return ExprList(resolved_exprs)
@@ -127,7 +127,7 @@ class DictExpr(Expr):
     def beta_reduce(self, bindings):
         return DictExpr([k.beta_reduce(bindings) for k in self.keys], [v.beta_reduce(bindings) for v in self.values])
 
-    def _resolve(self):
+    def _reduce(self):
         for key,value in izip(self.keys, self.values):
             key.resolve()
             value.resolve()
@@ -144,7 +144,7 @@ class ListExpr(Expr):
     def beta_reduce(self, bindings):
         return ListExpr([v.beta_reduce(bindings) for v in self.values])
 
-    def _resolve(self):
+    def _reduce(self):
         """
         Processes an exprs and resolves name bindings and creating new local vars 
         in the process if required.
@@ -163,7 +163,7 @@ class TupleExpr(Expr):
     def beta_reduce(self, bindings):
         return ListExpr([v.beta_reduce(bindings) for v in self.values])
 
-    def _resolve(self):
+    def _reduce(self):
         """
         Processes an exprs and resolves name bindings and creating new local vars 
         in the process if required.
@@ -190,7 +190,7 @@ class IfExpr(Expr):
     def set_evaluated_typeexpr(self, vartype):
         assert False, "cannot set evaluated type of an If expr (yet)"
 
-    def _resolve(self):
+    def _reduce(self):
         """ Resolves bindings and types in all child exprs. """
         ipdb.set_trace()
         assert self._evaluated_typeexpr == None, "Type has already been resolved, should not have been called twice."
