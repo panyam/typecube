@@ -42,6 +42,15 @@ class Expr(NameResolver, Annotatable):
     def reduce_once(self):
         return self, False
 
+    def own(self, expr):
+        """ Owns' an expression by setting its parent to ourselves.
+
+        If the expression already has a parent then it is cloned.
+        """
+        if expr.parent: expr = expr.clone()
+        expr.parent = self
+        return expr
+
     @property
     def free_variables(self):
         if self._free_variables is None:
@@ -97,6 +106,7 @@ class Var(Expr):
     """ An occurence of a name that can be bound to a value, a field or a type. """
     def __init__(self, name):
         Expr.__init__(self)
+        if type(name) not in (str, unicode): set_trace()
         assert type(name) in (str, unicode)
         self.name = name
         # The depth (or static depth or the de bruijn index) is the distance 
@@ -144,6 +154,7 @@ class Abs(Expr):
         Expr.__init__(self, parent)
         self.fqn = fqn
         self._expr = None
+        if type(expr) in (str, unicode): expr = Var(expr)
         self.expr = expr
         if type(params) in (str, unicode): params = [params]
         self.params = params
@@ -152,6 +163,15 @@ class Abs(Expr):
         if self.fun_type:
             self.fun_type.parent = self
         self.temp_variables = {}
+
+    def __repr__(self):
+        return "<%s(0x%x) Params(%s), Expr = %s>" % (self.__class__.__name__, id(self), ",".join(self.params), repr(self.expr))
+
+
+    def clone(self):
+        new_expr = None if not self.expr else self.expr.clone()
+        fun_type = None if not self.fun_type else self.fun_type.clone()
+        return self.set_expr(new_expr, fun_type)
 
     def generate_names(self, starting_name):
         for i in xrange(1000000):
@@ -210,10 +230,13 @@ class Abs(Expr):
 
         # Then the actual substitutions
         new_expr,expr_reduced = this.expr.substitute(new_bindings)
-        out = self.__class__(this.params, new_expr, this.fqn, this.parent)
-        out.temp_variables = this.temp_variables
-        out.fun_type = new_fun_type
-        return out, True
+        return this.set_expr(new_expr, new_fun_type), True
+
+    def set_expr(self, expr, fun_type = None):
+        out = self.__class__(self.params, expr, self.fqn)
+        out.temp_variables = self.temp_variables.copy()
+        out.fun_type = fun_type
+        return out
 
     def eval_param_renames(self, freevars):
         """ Return parameter renamings required for a capture free substitution.
@@ -260,7 +283,7 @@ class Abs(Expr):
 
     @property
     def name(self):
-        return self.fqn.split(".")[-1]
+        return None if not self.fqn else self.fqn.split(".")[-1]
 
     @property
     def is_external(self): return self.expr is None
@@ -269,8 +292,31 @@ class Abs(Expr):
         assert self.expr is not None
         bindings = dict(zip(self.params, args))
         out, reduced = self.expr.substitute(bindings)
-        out.parent = self.parent
+
+        left_params = []
+        source_types = []
+        for index,param in enumerate(self.params):
+            if param not in bindings:
+                if self.fun_type:
+                    source_types.append(self.fun_type.source_types[index])
+                left_params.append(param)
+        if left_params:
+            # Since not all params have been applied, we do function currying!
+            new_fun_type = None
+            if self.fun_type:
+                new_fun_type = FunType(self.fun_type.fqn, source_types, self.fun_type.return_type)
+            out = self.__class__(left_params, out, self.fqn, None, new_fun_type)
         return out
+
+    def reduce_once(self):
+        expr, reduced = self.expr.reduce()
+        fun_type, fun_reduced = None, False,
+        if self.fun_type:
+            fun_type, fun_reduced  = self.fun_type.reduce()
+        if reduced or fun_reduced:
+            return self.set_expr(expr, fun_type), True
+        else:
+            return self, False
 
     def _resolve_name(self, name, condition = None):
         """ Try to resolve a name to a local, source or destination variable. """
@@ -357,28 +403,28 @@ class App(Expr):
     """ Base of all application expressions. """
     def __init__(self, expr, args):
         Expr.__init__(self)
+        if type(expr) in (str, unicode): expr = Var(expr)
         self.expr = expr
-        self.args = args
-        self.expr = expr
-        if args and type(args) is not list:
-            args = [args]
-        self.args = args
-        self.expr.parent = self
-        for arg in self.args:
+        self.own(expr)
+
+        if args and type(args) is not list: args = [args]
+        for i,arg in enumerate(args):
+            if type(arg) in (str, unicode): arg = Var(arg)
             if not isinstance(arg, Expr): set_trace()
-            arg.parent = self
+            args[i] = self.own(arg)
+        self.args = args
 
     def eval_free_variables(self):
         out = set(self.expr.free_variables)
-        for expr in self.exprs:
-            out = out.union(expr.free_variables)
+        for arg in self.args:
+            out = out.union(arg.free_variables)
         return out
 
     def __repr__(self):
         return "<%s(0x%x) Expr = %s, Args = (%s)>" % (self.__class__.__name__, id(self), repr(self.expr), ", ".join(map(repr, self.args)))
 
     def clone(self):
-        return self.__class__(self.expr.clone(), [arg.clone() for arg in self.args], None)
+        return self.__class__(self.expr.clone(), [arg.clone() for arg in self.args])
 
     def reduce_once(self):
         fun, fun_reduced = self.expr.reduce()
@@ -453,7 +499,7 @@ class ContainerType(Type):
         Type.__init__(self, fqn, parent)
         self.typeexprs = typeexprs
         for typeexpr in self.typeexprs:
-            typeexpr.parent = self
+            self.own(typeexpr)
         self.is_labelled = False
         self.params = params or []
         self.param_indices = dict(enumerate(params or []))
@@ -553,3 +599,38 @@ def make_enum_type(fqn, symbols, parent = None):
 KindType = make_atomic_type("Type")
 AnyType = make_atomic_type("any")
 VoidType = make_atomic_type("void")
+
+def equiv(expr1, expr2, mapping12 = None, mapping21 = None):
+    """ Checks if two exprs are equivalent. """
+    if expr1 == expr2: return True
+    if type(expr1) != type(expr2): return False
+    if mapping12 is None: mapping12 = {}
+    if mapping21 is None: mapping21 = {}
+
+    if type(expr1) is Var:
+        if expr1.name in mapping12 and expr2.name in mapping21:
+            return expr2.name == mapping12[expr1.name] and mapping21[expr2.name] == expr1.name
+        elif expr1.name not in mapping12 and expr2.name not in mapping21:
+            mapping12[expr1.name] = expr2.name
+            mapping21[expr2.name] = expr1.name
+            return True
+        else:
+            return False
+    elif isinstance(expr1, Abs):
+        if expr1.fqn != expr2.fqn: return False
+        return equiv(expr1.fun_type, expr2.fun_type, mapping12, mapping21) and \
+                equiv(expr1.expr, expr2.expr, mapping12, mapping21)
+    elif isinstance(expr1, App):
+        return equiv(expr1.expr, expr2.expr, mapping12, mapping21) and \
+                all(equiv(t1, t2, mapping12, mapping21) for t1,t2 in izip(expr1.args, expr2.args))
+    assert False, "Unknown type"
+
+def eprint(expr, level = 0):
+    if expr.isa(Var):
+        return expr.name
+    elif expr.isa(App):
+        return "%s(%s)" % (eprint(expr.expr), ", ".join(map(eprint, expr.args)))
+    elif expr.isa(Abs):
+        return "\(%s) { %s }" % (", ".join(expr.params), eprint(expr.expr))
+    assert False
+
