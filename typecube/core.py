@@ -121,8 +121,10 @@ class Var(Expr):
         self.offset = -1
 
     def substitute(self, bindings):
-        if self.name in bindings:
-            return bindings[self.name].clone(), True
+        res = bindings.get(self.name, None)
+        if res:
+            if type(res) in (str, unicode): return Var(res), True
+            return res.clone(), True
         return Var(self.name), False
 
     def parent_changed(self, oldvalue):
@@ -171,7 +173,7 @@ class Abs(Expr):
     def clone(self):
         new_expr = None if not self.expr else self.expr.clone()
         fun_type = None if not self.fun_type else self.fun_type.clone()
-        return self.set_expr(new_expr, fun_type)
+        return self.copy_with(new_expr, fun_type)
 
     def generate_names(self, starting_name):
         for i in xrange(1000000):
@@ -179,15 +181,20 @@ class Abs(Expr):
 
     def rename_params(self, **param_bindings):
         """ Renames bound parameters in this Abstraction based on the mappings given in the "param_bindings" map. """
-        for i,p in enumerate(self.params):
-            if p in param_binding:
-                self.params[i] = param_bindings[p]
-        self.return_param = param_bindings.get(self.return_param, self.return_param)
+        if not param_bindings:
+            return self
+        new_expr,reduced = self.expr.substitute(param_bindings)
+        out = self.copy_with(new_expr, self.fun_type)
+        for i,p in enumerate(out.params):
+            if p in param_bindings:
+                out.params[i] = param_bindings[p]
+        out.return_param = param_bindings.get(out.return_param, out.return_param)
         for k,v in param_bindings.iteritems():
-            if k in self.temp_variables:
-                value = self.temp_variables[k]
-                del self.temp_variables[k]
-                self.temp_variables[v] = value
+            if k in out.temp_variables:
+                value = out.temp_variables[k]
+                del out.temp_variables[k]
+                out.temp_variables[v] = value
+        return out
 
     def bound_params(self):
         return set(self.params).union([self.return_param]).union(self.temp_variables.keys())
@@ -195,46 +202,55 @@ class Abs(Expr):
     def is_bound(self, param):
         return param in self.params or param == self.return_param or param in self.temp_variables
 
+    def apply(self, args):
+        assert self.expr is not None
+        args = [Var(a) if type(a) in (str, unicode) else a for a in args]
+
+        # Calculate all free vars in the arguments
+        arg_free_vars = set()
+        for arg in args:
+            arg_free_vars = arg_free_vars.union(arg.free_variables)
+
+        param_bindings = self.eval_param_renames(arg_free_vars)
+        this = self.rename_params(**param_bindings)
+        bindings = dict(zip(this.params, args))
+
+        out, reduced = this.expr.substitute(bindings)
+
+        left_params = []
+        source_types = []
+        for index,param in enumerate(this.params):
+            if param not in bindings:
+                if this.fun_type:
+                    source_types.append(this.fun_type.source_types[index])
+                left_params.append(param)
+        if left_params:
+            # Since not all params have been applied, we do function currying!
+            new_fun_type = None
+            if this.fun_type:
+                new_fun_type = FunType(this.fun_type.fqn, source_types, this.fun_type.return_type)
+            out = this.__class__(left_params, out, this.fqn, None, new_fun_type)
+        return out
+
     def substitute(self, bindings):
-        # We need to do substitutions in 2 places
-        # 1. The function types (with nothing removed from the bindings)
-        # 2. The expr with the bindings - argnames
-
-        # First filter out bindings that are bound parameters
-        # No point changing \x:f(x) to \y:f(y)
-        new_bindings = {}
-        sub_free_vars = set()
-        for k,v in (bindings or {}).iteritems():
-            # Ignore bound variables
-            if self.is_bound(k): continue
-            new_bindings[k] = v
-            sub_free_vars = sub_free_vars.union(v.free_variables)
-
         # No bindings - nothing to be done
-        if not new_bindings: return self, False
-
-        # Remove all variables from the bindings that are bound to us
         new_fun_type,fun_reduced = None,False
         if self.fun_type:
             new_fun_type,fun_reduced = self.fun_type.substitute(bindings)
 
-        if not self.expr:
-            # No expression, may be nothing to do
-            if not fun_reduced:
-                return self, False
-            return self.__class__(params, None, self.fqn, parent, new_fun_type), fun_reduced
+        bindings = {k:v for k,v in bindings.iteritems() if k not in self.params}
+        if not bindings or not self.expr:
+            out = self.copy_with(self.expr, new_fun_type)
+            return out, out != self
 
-        # Alpha renaming to ensure capture free subs is possible
-        param_bindings = self.eval_param_renames(sub_free_vars)
-        this, reduced = self.substitute(param_bindings)
+        new_expr,expr_reduced = self.expr.substitute(bindings)
+        return self.copy_with(new_expr, new_fun_type), True
 
-        # Then the actual substitutions
-        new_expr,expr_reduced = this.expr.substitute(new_bindings)
-        return this.set_expr(new_expr, new_fun_type), True
-
-    def set_expr(self, expr, fun_type = None):
+    def copy_with(self, expr, fun_type = None):
+        if expr == self.expr and fun_type == self.fun_type: return self
         out = self.__class__(self.params, expr, self.fqn)
         out.temp_variables = self.temp_variables.copy()
+        out.return_param = self.return_param
         out.fun_type = fun_type
         return out
 
@@ -288,33 +304,13 @@ class Abs(Expr):
     @property
     def is_external(self): return self.expr is None
 
-    def apply(self, args):
-        assert self.expr is not None
-        bindings = dict(zip(self.params, args))
-        out, reduced = self.expr.substitute(bindings)
-
-        left_params = []
-        source_types = []
-        for index,param in enumerate(self.params):
-            if param not in bindings:
-                if self.fun_type:
-                    source_types.append(self.fun_type.source_types[index])
-                left_params.append(param)
-        if left_params:
-            # Since not all params have been applied, we do function currying!
-            new_fun_type = None
-            if self.fun_type:
-                new_fun_type = FunType(self.fun_type.fqn, source_types, self.fun_type.return_type)
-            out = self.__class__(left_params, out, self.fqn, None, new_fun_type)
-        return out
-
     def reduce_once(self):
         expr, reduced = self.expr.reduce()
         fun_type, fun_reduced = None, False,
         if self.fun_type:
             fun_type, fun_reduced  = self.fun_type.reduce()
         if reduced or fun_reduced:
-            return self.set_expr(expr, fun_type), True
+            return self.copy_with(expr, fun_type), True
         else:
             return self, False
 
@@ -577,7 +573,7 @@ def make_alias(fqn, target_type, parent = None):
     return AliasType(fqn, target_type, parent)
 
 def make_type_op(fqn, type_params, expr, parent):
-    return TypeOp(fqn, type_params, expr, parent)
+    return TypeOp(type_params, expr, fqn = fqn, parent = parent)
 
 def make_ref(target_fqn, parent = None):
     return TypeRef(target_fqn, parent)

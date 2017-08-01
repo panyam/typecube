@@ -27,7 +27,11 @@ zero = church_lit(0)
 
 plus = Abs(["m", "n", "f", "x"], App("m", ["f", App("n", ["f", "x"])]))
 succ = Abs(["n", "f", "x"], App("f", App("n", ["f", "x"])))
-pred = Abs(["n", "f", "x"], App("n", [Abs(["g", "h"], App("h", App("g", "f"))), Abs("u", "x"), Abs("u", "u")]))
+pred = Abs(["n", "f", "x"],
+            App("n",
+                [Abs(["g", "h"], App("h", App("g", "f"))),
+                 Abs("u", "x"),
+                 Abs("u", "u")]))
 mult = Abs(["m", "n", "f"], App("m", App("n", "f")))
 minus = Abs(["m", "n"], App(App("n", pred), "m"))
 
@@ -85,6 +89,23 @@ def test_substitution_multi_var(mocker):
     assert result.isa(App)
     assert result.expr.isa(Var)
     assert result.expr.name == "sum"
+
+def test_app_simple():
+    """ Simple applications.  """
+    expr = Abs("x", "y")
+    result = expr.apply("z")
+    assert result.isa(Var)
+    assert result.name == "y"
+    expr = Abs("x", "x")
+    result = expr.apply("z")
+    assert result.isa(Var)
+    assert result.name == "z"
+
+def test_app_simple():
+    # \x. (x (y z))
+    expr = Abs("x", App("x", ["y", "z"]))
+    set_trace()
+    result = expr.apply("z")
 
 def test_booleans():
     v = Var("v")
@@ -165,6 +186,7 @@ def test_church_numerals_succ():
 def test_church_numerals_pred():
     one = church_lit(1)
     pone = App(pred, one)
+    set_trace()
     f,success = pone.reduce()
     assert equiv(zero, f)
 

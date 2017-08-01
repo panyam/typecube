@@ -1,5 +1,5 @@
 
-import ipdb
+from ipdb import set_trace
 from typecube import core as tlcore
 from typecube.core import Expr
 from typecube.annotations import Annotatable
@@ -205,12 +205,11 @@ class IfExpr(Expr):
         self._evaluated_typeexpr = tlcore.VoidType
         return self
 
-class Module(Expr, Annotatable):
-    def __init__(self, fqn, parent = None, annotations = None, docs = ""):
+class Module(Expr):
+    def __init__(self, fqn, parent = None):
         Expr.__init__(self, parent)
-        Annotatable.__init__(self, annotations, docs)
-        self._fqn = fqn
-        self._parent = parent 
+        self.fqn = fqn
+        self.parent = parent 
         self.entity_map = {}
         self.child_entities = []
         self.aliases = {}
@@ -262,18 +261,6 @@ class Module(Expr, Annotatable):
                 return None
             curr = curr.entity_map[part]
         return curr
-
-    @property
-    def name(self): return self._name
-
-    @property
-    def parent(self): return self._parent
-
-    def __json__(self, **kwargs):
-        out = {}
-        if self.fqn:
-            out["fqn"] = self.fqn
-        return out
 
     def ensure_module(self, fqn):
         """ Ensures that the module given by FQN exists from this module and is a Module object. """
