@@ -6,27 +6,12 @@ from itertools import izip
 from typecube import errors
 from typecube.annotations import Annotatable
 
-class NameResolver(object):
-    def resolve_name(self, name, condition = None):
-        """ Tries to resolve a name in this expression. 
-        This returns the value of a name (the associated expression)
-        as well as the parent object that is the holder/owner of this
-        name.
-        """
-        parent,value = self._resolve_name(name, condition)
-        if value and (condition is None or condition(value)):
-            return parent,value
-        if self.parent:     # Try the parent expression
-            return self.parent.resolve_name(name, condition)
-        raise errors.TLException("Unable to resolve name: %s" % name)
-
-class Expr(NameResolver, Annotatable):
+class Expr(Annotatable):
     """
     Parent of all exprs.  All exprs must have a value.  Exprs only appear in functions.
     """
-    def __init__(self, parent = None):
+    def __init__(self):
         Annotatable.__init__(self)
-        self._parent = parent
         self._free_variables = None
 
     def reduce(self):
@@ -41,15 +26,6 @@ class Expr(NameResolver, Annotatable):
 
     def reduce_once(self):
         return self, False
-
-    def own(self, expr):
-        """ Owns' an expression by setting its parent to ourselves.
-
-        If the expression already has a parent then it is cloned.
-        """
-        if expr.parent: expr = expr.clone()
-        expr.parent = self
-        return expr
 
     @property
     def free_variables(self):
@@ -66,41 +42,6 @@ class Expr(NameResolver, Annotatable):
 
     def isa(self, cls):
         return type(self) == cls
-
-    def clear_parent(self):
-        """ Clears the parent of an expression.
-        This is an explicit method instead of a "force" option in set_parent
-        so that the caller is cognizant of doing this.
-        """
-        if self.parent:
-            oldvalue = self._parent
-            self._parent = None
-            self.parent_changed(oldvalue)
-
-    @property
-    def parent(self):
-        return self._parent
-
-    @parent.setter
-    def parent(self, value):
-        self.set_parent(value)
-
-    def set_parent(self, value):
-        if self.validate_parent(value):
-            oldvalue = self._parent
-            self._parent = value
-            self.parent_changed(oldvalue)
-
-    def validate_parent(self, value):
-        if self._parent is not None and value != self._parent: set_trace()
-        return True
-
-    def parent_changed(self, oldvalue):
-        pass
-
-    #########
-    def _resolve_name(self, name, condition = None):
-        return None,None
 
 class Var(Expr):
     """ An occurence of a name that can be bound to a value, a field or a type. """
@@ -127,10 +68,6 @@ class Var(Expr):
             return res.clone(), True
         return Var(self.name), False
 
-    def parent_changed(self, oldvalue):
-        self.depth = -1
-        self.offset = -1
-
     def eval_free_variables(self):
         return {self.name}
 
@@ -142,8 +79,8 @@ class Var(Expr):
 
 class Type(Expr):
     """ Base Type interface. """
-    def __init__(self, fqn, parent):
-        Expr.__init__(self, parent)
+    def __init__(self, fqn):
+        Expr.__init__(self)
         self.fqn = fqn
 
     @property
@@ -152,18 +89,15 @@ class Type(Expr):
 
 class Abs(Expr):
     """ Base of all abstractions/function expressions. """
-    def __init__(self, params, expr, fqn = None, parent = None, fun_type = None):
-        Expr.__init__(self, parent)
+    def __init__(self, params, expr, fqn = None, fun_type = None):
+        Expr.__init__(self)
         self.fqn = fqn
-        self._expr = None
         if type(expr) in (str, unicode): expr = Var(expr)
         self.expr = expr
         if type(params) in (str, unicode): params = [params]
         self.params = params
         self.return_param = "dest"
         self.fun_type = fun_type
-        if self.fun_type:
-            self.fun_type.parent = self
         self.temp_variables = {}
 
     def __repr__(self):
@@ -284,20 +218,6 @@ class Abs(Expr):
         return out
 
     @property
-    def expr(self):
-        return self._expr
-
-    @expr.setter
-    def expr(self, value):
-        if self._expr:
-            # Set old expr's parent to None
-            # TODO - This has to be forced
-            self._expr.clear_parent()
-        self._expr = value
-        if value:
-            value.parent = self
-
-    @property
     def name(self):
         return None if not self.fqn else self.fqn.split(".")[-1]
 
@@ -359,7 +279,7 @@ class Fun(Abs):
         resolved_expr = None if not self.expr else self.expr.resolve()
         if new_fun_type == self.fun_type and resolved_expr == self.expr:
             return self
-        out = Fun(self.params, resolved_expr, self.fqn, self.parent, new_fun_type)
+        out = Fun(self.params, resolved_expr, self.fqn, new_fun_type)
         return out
 
 class Quant(Abs):
@@ -368,31 +288,31 @@ class Quant(Abs):
     Unlike normal functions (abstractions), which take terms/expressions as arguments, a Quantification takes types arguments
     and returns an expression with the arguments substituted with the types.
     """
-    def __init__(self, params, expr, fqn = None, parent = None):
+    def __init__(self, params, expr, fqn = None):
         fun_type = make_fun_type(None, [KindType] * len(params), KindType, self)
-        Abs.__init__(self, params, expr, fqn, parent, fun_type)
+        Abs.__init__(self, params, expr, fqn, fun_type)
 
     def _reduce(self):
         resolved_expr = None if not self.expr else self.expr.resolve()
         if resolved_expr == self.expr:
             return self
-        out = Quant(self.params, resolved_expr, self.fqn, self.parent, self.fun_type)
+        out = Quant(self.params, resolved_expr, self.fqn, self.fun_type)
         return out
 
 class TypeOp(Abs):
     """ Type operators are "functions" over types.  
     They take proper types as arguments and return new types.  
     Type operators are NOT types, but just expressions (abstractions) that return types. """
-    def __init__(self, params, expr, fqn = None, parent = None):
-        fun_type = make_fun_type(None, [KindType] * len(params), KindType, self)
-        Abs.__init__(self, params, expr, fqn, parent, fun_type)
+    def __init__(self, params, expr, fqn = None):
+        fun_type = make_fun_type(None, [KindType] * len(params), KindType)
+        Abs.__init__(self, params, expr, fqn, fun_type)
         assert not expr or expr.isany(Type)
 
     def _reduce(self):
         resolved_expr = None if not self.expr else self.expr.resolve()
         if resolved_expr == self.expr:
             return self
-        out = Quant(self.params, resolved_expr, self.fqn, self.parent, self.fun_type)
+        out = Quant(self.params, resolved_expr, self.fqn, self.fun_type)
         return out
 
 class App(Expr):
@@ -401,13 +321,11 @@ class App(Expr):
         Expr.__init__(self)
         if type(expr) in (str, unicode): expr = Var(expr)
         self.expr = expr
-        self.own(expr)
 
         if args and type(args) is not list: args = [args]
         for i,arg in enumerate(args):
             if type(arg) in (str, unicode): arg = Var(arg)
             if not isinstance(arg, Expr): set_trace()
-            args[i] = self.own(arg)
         self.args = args
 
     def eval_free_variables(self):
@@ -457,11 +375,11 @@ class TypeApp(Type, App):
     Unlike quantifications or functions, this returns a type when types are 
     passed as arguments.
     """
-    def __init__(self, expr, args, parent = None):
+    def __init__(self, expr, args):
         if type(expr) in (str, unicode):
             expr = make_ref(expr)
         App.__init__(self, expr, args)
-        Type.__init__(self, None, parent)
+        Type.__init__(self, None)
         assert(all(t.isany(Type) for t in args)), "All type args in a TypeApp must be Type sub classes"
 
     def resolve_function(self):
@@ -477,61 +395,60 @@ class AtomicType(Type):
     def clone(self):
         return AtomicType(self.fqn, None, self.annotations, self.docs)
 
-    def validate_parent(self, value):
-        """ With atomic types once the parent is set, we dont want them changed. """
-        return self.parent is None
-
 class AliasType(Type):
-    def __init__(self, fqn, target_type, parent):
-        Type.__init__(self, fqn, parent)
+    def __init__(self, fqn, target_type):
+        Type.__init__(self, fqn)
         self.target_type = target_type
         assert self.target_type.isany(Type)
 
     def clone(self):
         return make_alias(self.fqn, self.target_type, None, self.annotations, self.docs)
 
+class AnnotatedExpr(Annotatable):
+    def __init__(self, expr, name = None, is_optional = False, default_value = None, annotations = None, docs = ""):
+        Annotatable.__init__(self, annotations, docs)
+        self.default_value = default_value
+        self.is_optional = is_optional
+        self.expr = expr
+        self.name = name
+
 class ContainerType(Type):
-    def __init__(self, fqn, typeexprs, params, parent):
-        Type.__init__(self, fqn, parent)
-        self.typeexprs = typeexprs
-        for typeexpr in self.typeexprs:
-            self.own(typeexpr)
+    def __init__(self, fqn, typeargs):
+        Type.__init__(self, fqn)
+        assert all([type(t) == AnnotatedExpr for t in typeargs])
+        self.typeargs = typeargs
         self.is_labelled = False
-        self.params = params or []
-        self.param_indices = dict(enumerate(params or []))
-        if params:
+        self.params = []
+        if typeargs and typeargs[0].name:
             self.is_labelled = True
+            self.params = [t.name for t in typeargs]
+        self.param_indices = dict([(v,i) for i,v in enumerate(self.params)])
 
     def type_for_param(self, param):
-        return self.typeexprs[self.param_indices[param]]
+        return self.typeargs[self.param_indices[param]]
 
     def substitute(self, bindings):
-        typeexprs = [typeexpr.substitute(bindings) for texpr in self.typeexprs]
-        return self.__class__(self.tag, self.fqn, typeexprs, self.params, parent)
+        typeargs = [typeexpr.substitute(bindings) for texpr in self.typeargs]
+        return self.__class__(self.tag, self.fqn, typeargs)
 
 class ProductType(ContainerType):
-    def __init__(self, tag, fqn, typeexprs, params, parent):
-        ContainerType.__init__(self, fqn, typeexprs, params, parent)
+    def __init__(self, tag, fqn, typeargs):
+        ContainerType.__init__(self, fqn, typeargs)
         self.tag = tag
 
 class SumType(ContainerType):
-    def __init__(self, tag, fqn, typeexprs, params, parent):
-        ContainerType.__init__(self, fqn, typeexprs, params, parent)
+    def __init__(self, tag, fqn, typeargs):
+        ContainerType.__init__(self, fqn, typeargs)
         self.tag = tag
 
 class FunType(Type):
     """ Represents function types.
     Note that function types do not reference the "names" of the function parameters.
     """
-    def __init__(self, fqn, source_types, return_type, parent):
-        Type.__init__(self, fqn, parent)
+    def __init__(self, fqn, source_types, return_type):
+        Type.__init__(self, fqn)
         self.return_type = return_type
         self.source_types = source_types
-        for expr in self.source_types:
-            if not expr.parent:
-                expr.parent = self
-        if self.return_type and not self.return_type.parent:
-            self.return_type.parent = self
 
     def substitute(self, bindings):
         new_source_types = [st.substitute(bindings) for st in self.source_types]
@@ -557,37 +474,37 @@ class TypeRef(Type):
     def _reduce(self):
         return self.resolve_name(self.fqn)
 
-def make_atomic_type(fqn, parent = None):
-    return AtomicType(fqn, parent)
+def make_atomic_type(fqn):
+    return AtomicType(fqn)
 
-def make_product_type(tag, fqn, types, params, parent = None):
-    return ProductType(tag, fqn, types, params, parent)
+def make_product_type(tag, fqn, typeargs):
+    return ProductType(tag, fqn, typeargs)
 
-def make_sum_type(tag, fqn, types, params, parent = None):
-    return SumType(tag, fqn, types, params, parent)
+def make_sum_type(tag, fqn, typeargs):
+    return SumType(tag, fqn, typeargs)
 
-def make_fun_type(fqn, source_types, return_type, parent = None):
-    return FunType(fqn, source_types, return_type, parent)
+def make_fun_type(fqn, source_types, return_type):
+    return FunType(fqn, source_types, return_type)
 
-def make_alias(fqn, target_type, parent = None):
-    return AliasType(fqn, target_type, parent)
+def make_alias(fqn, target_type):
+    return AliasType(fqn, target_type)
 
-def make_type_op(fqn, type_params, expr, parent):
-    return TypeOp(type_params, expr, fqn = fqn, parent = parent)
+def make_type_op(fqn, type_params, expr):
+    return TypeOp(type_params, expr, fqn = fqn)
 
-def make_ref(target_fqn, parent = None):
-    return TypeRef(target_fqn, parent)
+def make_ref(target_fqn):
+    return TypeRef(target_fqn)
 
-def make_type_app(expr, typeargs, parent = None):
-    return TypeApp(expr, typeargs, parent)
+def make_type_app(expr, typeargs):
+    return TypeApp(expr, typeargs)
 
-def make_enum_type(fqn, symbols, parent = None):
+def make_enum_type(fqn, symbols):
     typeargs = []
     for name,value,sym_annotations,sym_docs in symbols:
         ta = TypeArg(name, VoidType, False, value)
         ta.set_annotations(sym_annotations).set_docs(sym_docs)
         typeargs.append(ta)
-    out = SumType("enum", fqn, typeargs, parent)
+    out = SumType("enum", fqn, typeargs)
     for ta in typeargs:
         ta.expr = out
     return out

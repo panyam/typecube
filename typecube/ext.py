@@ -11,15 +11,13 @@ LongType = tlcore.make_atomic_type("long")
 FloatType = tlcore.make_atomic_type("float")
 DoubleType = tlcore.make_atomic_type("double")
 StringType = tlcore.make_atomic_type("string")
-MapType = tlcore.make_type_op("map", ["K", "V"], None, None)
-ListType = tlcore.make_type_op("list", ["V"], None, None)
+MapType = tlcore.make_type_op("map", ["K", "V"], None)
+ListType = tlcore.make_type_op("list", ["V"], None)
 
 class MatchExp(Expr):
     def __init__(self, patterns, expr):
         self.patterns = patterns
-        for pat in patterns: pat.parent = self
         self.expr = expr
-        self.expr.parent = self
 
 class NewExpr(Expr):
     """ An expression used to create instead of a type.  It can be passed values for its child arguments.
@@ -28,7 +26,6 @@ class NewExpr(Expr):
     def __init__(self, objtype, **arg_values):
         self.objtype = objtype
         self.arg_values = arg_values or {}
-        for expr in arg_values.iteritems(): expr.parent = self
 
     def _reduce(self):
         resolved_objtype = self.objtype.resolve()
@@ -41,7 +38,6 @@ class Index(Expr):
         Expr.__init__(self)
         self.expr = expr
         self.key = key
-        self.expr.parent = self
 
     @property
     def clone(self):
@@ -57,9 +53,7 @@ class Assignment(Expr):
     def __init__(self, target, expr):
         Expr.__init__(self)
         self.expr = expr
-        self.expr.parent = self
         self.target = target
-        self.target.parent = self
 
     def beta_reduce(self, bindings):
         return Assignment(self.target.clone(), self.expr.beta_reduce(bindings))
@@ -90,7 +84,6 @@ class ExprList(Expr):
     def __init__(self, children = None):
         Expr.__init__(self)
         self.children = children or []
-        for expr in self.children: expr.parent = self
 
     def beta_reduce(self, bindings):
         return ExprList([c.beta_reduce(bindings) for c in self.children])
@@ -100,12 +93,10 @@ class ExprList(Expr):
             ipdb.set_trace()
             assert issubclass(expr.__class__, Expr), "Cannot add non Expr instances to an ExprList"
         self.children.append(expr)
-        expr.parent = self
 
     def extend(self, another):
         if type(another) is ExprList:
             self.children.extend(another.children)
-            for expr in children: expr.parent = self
         else:
             self.add(another)
 
@@ -120,8 +111,6 @@ class DictExpr(Expr):
         super(DictExpr, self).__init__()
         self.keys = keys
         self.values = values
-        for expr in keys: expr.parent = self
-        for expr in values: expr.parent = self
         assert len(keys) == len(values)
 
     def beta_reduce(self, bindings):
@@ -139,7 +128,6 @@ class ListExpr(Expr):
     def __init__(self, values):
         super(ListExpr, self).__init__()
         self.values = values
-        for expr in values: expr.parent = self
 
     def beta_reduce(self, bindings):
         return ListExpr([v.beta_reduce(bindings) for v in self.values])
@@ -158,7 +146,6 @@ class TupleExpr(Expr):
     def __init__(self, values):
         super(TupleExpr, self).__init__()
         self.values = values or []
-        for expr in values: expr.parent = self
 
     def beta_reduce(self, bindings):
         return ListExpr([v.beta_reduce(bindings) for v in self.values])
@@ -179,10 +166,6 @@ class IfExpr(Expr):
         super(IfExpr, self).__init__()
         self.cases = cases or []
         self.default_expr = default_expr or []
-        for condition, expr in self.cases:
-            condition.parent = self
-            expr.parent = self
-        if default_expr: default_expr.parent = self
 
     def __repr__(self):
         return "<IfExp - ID: 0x%x>" % (id(self))
@@ -206,10 +189,9 @@ class IfExpr(Expr):
         return self
 
 class Module(Expr):
-    def __init__(self, fqn, parent = None):
-        Expr.__init__(self, parent)
+    def __init__(self, fqn):
+        Expr.__init__(self)
         self.fqn = fqn
-        self.parent = parent 
         self.entity_map = {}
         self.child_entities = []
         self.aliases = {}
@@ -246,7 +228,6 @@ class Module(Expr):
         """ Adds a new child entity. """
         assert name and name not in self.entity_map, "Child entity '%s' already exists" % name
         # Take ownership of the entity
-        entity.parent = self
         self.entity_map[name] = entity
         self.child_entities.append(entity)
 
@@ -271,7 +252,7 @@ class Module(Expr):
             if not total: total = part
             else: total = total + "." + part
             if part not in curr.entity_map:
-                curr.add(part, Module(total, curr))
+                curr.add(part, Module(total))
             curr = curr.get(part)
             assert type(curr) is Module
         return curr
