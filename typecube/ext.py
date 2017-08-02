@@ -1,7 +1,7 @@
 
 from ipdb import set_trace
 from typecube import core as tlcore
-from typecube.core import Expr
+from typecube.core import Expr, Var
 from typecube.annotations import Annotatable
 
 BooleanType = tlcore.make_atomic_type("boolean")
@@ -13,6 +13,20 @@ DoubleType = tlcore.make_atomic_type("double")
 StringType = tlcore.make_atomic_type("string")
 MapType = tlcore.make_type_op("map", ["K", "V"], None)
 ListType = tlcore.make_type_op("list", ["V"], None)
+
+class Macro(Expr):
+    """ Macros are expressions that combine other expressions to create
+    new syntactic forms.  This is no more powerful than plain Abstractions
+    and Applications but let us extend other constructs (like loops, 
+    switch cases, conditionals, pattern matching and so on).
+    """
+    def __init__(self):
+        Expr.__init__(self)
+
+    def infer_type(self):
+        """ Called to infer the type of this expression based on its
+        child expression structure. """
+        pass
 
 class MatchExp(Expr):
     def __init__(self, patterns, expr):
@@ -50,7 +64,7 @@ class Index(Expr):
         return Index(self.expr.beta_reduce(bindings), self.key)
 
 class Assignment(Expr):
-    def __init__(self, target, expr):
+    def __init__(self, target, expr, is_temporary):
         Expr.__init__(self)
         self.expr = expr
         self.target = target
@@ -202,27 +216,11 @@ class Module(Expr):
 
     def set_alias(self, name, fqn):
         """Sets the alias of a particular name to an FQN."""
-        self.aliases[name] = fqn
+        self.aliases[name] = Var(fqn)
         return self
 
-    def find_fqn(self, fqn):
-        """Looks for a FQN in either the aliases or child entities or recursively in the parent."""
-        out = None
-        curr = self
-        while curr and not out:
-            out = curr.aliases.get(fqn, None)
-            if not out:
-                out = curr.get(fqn)
-            if not out:
-                curr = curr.parent
-        return out
-
-    def _resolve_name(self, name, condition = None):
-        # TODO - handle conditions here
-        entry = self.find_fqn(name)
-        while entry and type(entry) in (str, unicode):
-            entry = self.find_fqn(entry)
-        return entry
+    def resolve_name(self, name):
+        return self.get(name)
 
     def add(self, name, entity):
         """ Adds a new child entity. """
@@ -238,9 +236,12 @@ class Module(Expr):
             parts = fqn_or_parts.split(".")
         curr = self
         for part in parts:
-            if part not in curr.entity_map:
+            if part in self.aliases:
+                curr = self.aliases.get(part)
+            elif part in curr.entity_map:
+                curr = curr.entity_map[part]
+            else:
                 return None
-            curr = curr.entity_map[part]
         return curr
 
     def ensure_module(self, fqn):

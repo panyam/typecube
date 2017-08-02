@@ -52,6 +52,9 @@ class Annotations(object):
     def __iter__(self):
         return iter(self.all_annotations)
 
+    def add(self, annotation):
+        self.all_annotations.append(annotation)
+
     def has(self, name):
         """
         Returns True if there is atleast one annotation by a given name, otherwise False.

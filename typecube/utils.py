@@ -124,7 +124,7 @@ class ResolutionStatus(object):
         if not self._resolved:
             if self._resolving:
                 from typecube import errors
-                raise errors.TLException("Action already in progress.   Possible circular dependency found")
+                raise errors.TCException("Action already in progress.   Possible circular dependency found")
 
             self._resolving = True
 
