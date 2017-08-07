@@ -134,3 +134,7 @@ class ResolutionStatus(object):
             self._resolved = True
         return result
 
+def issubtype(pegtype, holetype):
+    # Checks if pegtype can be substituted for a holetype!  ie if 
+    # peg type fits in a hole type then pegtype is a subtype of holetype
+    return True

@@ -11,6 +11,8 @@ class Expr(Annotatable):
     def __init__(self):
         Annotatable.__init__(self)
         self._free_variables = None
+        self.inferred_type = None
+        self.resolved_value = None
 
     def reduce(self):
         tmp = None
@@ -56,12 +58,13 @@ class Type(Expr):
 
 class Var(Expr):
     """ An occurence of a name that can be bound to a value, a field or a type. """
-    def __init__(self, fqn):
+    def __init__(self, fqn, is_typevar = False):
         Expr.__init__(self)
         if fqn:
             if type(fqn) not in (str, unicode): set_trace()
             assert type(fqn) in (str, unicode)
         self.fqn = fqn
+        self.is_typevar = is_typevar
         # The depth (or static depth or the de bruijn index) is the distance 
         # between the use of the variable and where it is defined.  
         # eg a static depth of 1 => definition within the immediate parent
@@ -90,7 +93,7 @@ class Var(Expr):
         return Var(self.fqn)
 
     def __repr__(self):
-        return "<Var - ID: 0x%x, Value: %s>" % (id(self), self.fqn)
+        return "<0x%x - Var: '%s'>" % (id(self), self.fqn)
 
 class SymbolTable(object):
     """ A symbol table for a particular abstraction.
@@ -109,15 +112,18 @@ class SymbolTable(object):
                 assert len(params) == len(fun_type.source_types)
                 for param,st in zip(params, fun_type.source_types):
                     self.variables[param] = st
-                if fun_type.return_type:
-                    assert return_param
+                if fun_type.return_type and return_param:
                     self.variables[return_param] = fun_type.return_type
 
     def __contains__(self, value):
         return value in self.variables
 
     def type_for(self, varname):
-        return self.variables[varname]
+        out = self.variables[varname]
+        if not out: set_trace()
+        while out.isa(Ref):
+            out = out.contents
+        return out
 
     def copy(self):
         out = SymbolTable()
@@ -151,21 +157,20 @@ class Abs(Expr):
         self.params = params
         self.return_param = None
         self.fun_type = fun_type
-        self._symbol_table = None
+        self._symtable = None
 
     @property
-    def symbol_table(self):
-        if self._symbol_table is None:
-            self._symbol_table = SymbolTable(self.params, self.return_param, self.fun_type)
-        return self._symbol_table
+    def symtable(self):
+        if self._symtable is None:
+            self._symtable = SymbolTable(self.params, self.return_param, self.fun_type)
+        return self._symtable
 
-    @symbol_table.setter
-    def symbol_table(self, value):
-        self._symbol_table = value
+    @symtable.setter
+    def symtable(self, value):
+        self._symtable = value
 
     def __repr__(self):
-        return "<%s(0x%x) Params(%s), Expr = %s>" % (self.__class__.__name__, id(self), ",".join(self.params), repr(self.expr))
-
+        return "<0x%x - %s(%s) { %s }>" % (id(self), self.__class__.__name__, ",".join(self.params), repr(self.expr))
 
     def clone(self):
         new_expr = None if not self.expr else self.expr.clone()
@@ -223,7 +228,7 @@ class Abs(Expr):
     def copy_with(self, expr, fun_type = None):
         if expr == self.expr and fun_type == self.fun_type: return self
         out = self.__class__(self.params, expr, self.fqn)
-        out.symbol_table = self.symbol_table.copy()
+        out.symtable = self.symtable.copy()
         out.return_param = self.return_param
         out.fun_type = fun_type
         return out
@@ -233,7 +238,7 @@ class Abs(Expr):
         if not param_bindings: return self
         new_expr,reduced = self.expr.substitute(param_bindings)
         out = self.copy_with(new_expr, self.fun_type)
-        out.symbol_table = out.symbol_table.rename(**param_bindings)
+        out.symtable = out.symtable.rename(**param_bindings)
 
         for i,p in enumerate(out.params):
             if p in param_bindings:
@@ -288,8 +293,8 @@ class Abs(Expr):
             return self, False
 
     def resolve_name(self, name):
-        if name in self.symbol_table:
-            return self.symbol_table.type_for(name)
+        if name in self.symtable:
+            return self.symtable.type_for(name)
 
     def var_type(self, varname):
         return self.temp_variables[str(varname)]
@@ -321,8 +326,12 @@ class Quant(Abs):
     and returns an expression with the arguments substituted with the types.
     """
     def __init__(self, params, expr, fqn = None):
-        fun_type = make_fun_type(None, [KindType] * len(params), KindType)
+        fun_type = None # make_fun_type(None, [KindType] * len(params), KindType)
         Abs.__init__(self, params, expr, fqn, fun_type)
+        # Set the values of params in the symbol table as we know source types.
+        # We just dont konw the return type
+        for param in self.params:
+            self.symtable.variables[param] = Ref(KindType)
 
     def _reduce(self):
         resolved_expr = None if not self.expr else self.expr.resolve()
@@ -336,9 +345,17 @@ class TypeOp(Abs):
     They take proper types as arguments and return new types.  
     Type operators are NOT types, but just expressions (abstractions) that return types. """
     def __init__(self, params, expr, fqn = None):
-        fun_type = make_fun_type(None, [KindType] * len(params), KindType)
+        fun_type = None
+        if not expr:
+            fun_type = make_fun_type(None, [KindType] * len(params), KindType)
+        else:
+            assert expr.isany(Type)
         Abs.__init__(self, params, expr, fqn, fun_type)
-        assert not expr or expr.isany(Type)
+        if not fun_type:
+            # Set the values of params in the symbol table as we know source types.
+            # We just dont konw the return type
+            for param in self.params:
+                self.symtable.variables[param] = Ref(KindType)
 
     def _reduce(self):
         resolved_expr = None if not self.expr else self.expr.resolve()
@@ -367,7 +384,7 @@ class App(Expr):
         return out
 
     def __repr__(self):
-        return "<%s(0x%x) Expr = %s, Args = (%s)>" % (self.__class__.__name__, id(self), repr(self.expr), ", ".join(map(repr, self.args)))
+        return "<0x%x - %s - %s (%s)>" % (id(self), self.__class__.__name__, repr(self.expr), ", ".join(map(repr, self.args)))
 
     def clone(self):
         return self.__class__(self.expr.clone(), [arg.clone() for arg in self.args])
@@ -424,17 +441,11 @@ class AtomicType(Type):
     def substitute(self, bindings):
         return self
 
+    def __repr__(self):
+        return "<0x%x - AtomicType: %s>" % (id(self), self.fqn)
+
     def clone(self):
         return AtomicType(self.fqn, None, self.annotations, self.docs)
-
-class AliasType(Type):
-    def __init__(self, fqn, target_type):
-        Type.__init__(self, fqn)
-        self.target_type = target_type
-        assert self.target_type.isany(Type) or self.target_type.isa(Var)
-
-    def clone(self):
-        return make_alias(self.fqn, self.target_type, None, self.annotations, self.docs)
 
 class Ref(Expr):
     """ Reference expressions. """
@@ -454,6 +465,9 @@ class ContainerType(Type):
             self.is_labelled = True
             self.params = params
         self.param_indices = dict([(v,i) for i,v in enumerate(self.params)])
+
+    def __repr__(self):
+        return "<0x%x - %s(%s) - %s<%s>(%s)>" % (id(self), self.__class__.__name__, self.tag, self.fqn, ",".join(self.params or []), ", ".join(map(repr, self.typerefs)))
 
     def type_for_param(self, param):
         return self.typerefs[self.param_indices[param]]
@@ -503,9 +517,6 @@ def make_sum_type(tag, fqn, typerefs, params):
 def make_fun_type(fqn, source_types, return_type):
     return FunType(fqn, source_types, return_type)
 
-def make_alias(fqn, target_type):
-    return AliasType(fqn, target_type)
-
 def make_type_op(fqn, type_params, expr):
     return TypeOp(type_params, expr, fqn = fqn)
 
@@ -526,7 +537,7 @@ def make_enum_type(fqn, symbols):
         ta.expr = out
     return out
 
-KindType = make_atomic_type("Type")
+KindType = make_atomic_type("kind")
 AnyType = make_atomic_type("any")
 VoidType = make_atomic_type("void")
 

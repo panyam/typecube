@@ -68,6 +68,7 @@ class Assignment(Expr):
         Expr.__init__(self)
         self.expr = expr
         self.target = target
+        self.is_temporary = is_temporary
 
     def beta_reduce(self, bindings):
         return Assignment(self.target.clone(), self.expr.beta_reduce(bindings))
@@ -209,6 +210,9 @@ class Module(Expr):
         self.entity_map = {}
         self.child_entities = []
         self.aliases = {}
+
+    def __repr__(self):
+        return "<0x%x - Mod: '%s'>" % (id(self), self.fqn)
 
     @property
     def name(self):

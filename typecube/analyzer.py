@@ -6,7 +6,13 @@ from ipdb import set_trace
 from typecube import core as tccore
 from typecube import ext as tcext
 from typecube import errors
+from typecube.utils import issubtype
 from typecube.core import eprint
+
+NONE = 0
+FAILED = -1
+STARTED = 1
+SUCCESS = 2
 
 class Analyzer(object):
     """ The semantic analyzer for a parsed onering expression tree.
@@ -40,7 +46,6 @@ class Analyzer(object):
             tccore.QuantApp: self.analyze_quantapp,
             tccore.TypeApp: self.analyze_typeapp,
             tccore.FunType: self.analyze_funtype,
-            tccore.Ref: self.analyze_ref,
             tccore.Var: self.analyze_var,
             tccore.ProductType: self.analyze_container_type,
             tccore.SumType: self.analyze_container_type,
@@ -51,7 +56,7 @@ class Analyzer(object):
             tcext.Index: self.analyze_index,
         }
 
-    def resolve_variable(self, var):
+    def analyze_var(self, var):
         """ Resolves a name or a fqn given our current environment/resovler stack. """
         resolved_value = None
         for i in xrange(len(self.resolvers) - 1, -1, -1):
@@ -62,18 +67,49 @@ class Analyzer(object):
                 break
 
         if not resolved_value:
-            raise errors.TCException("Cannot resolve '%s'" % name)
+            raise errors.TCException("Cannot resolve '%s'" % var.fqn)
 
+
+        # When resolving a variable entry a few things have to be considered:
+        # 1. Who is resolving this variable?  Is it a module or a function?
+        # 2. What kind of value is being resolved.  Is it a kind? a type?
+        #    or an expression?  or another variable?
+        # 3. If the binder is a function then is the function the immediate 
+        #    parent or do we need to consider upvals/closures?
         var.binder = resolver
-        set_trace()
-        if value.isany(tccore.Type):
-            var.inferred_type = tccore.KindType
-        else:
-            if value.isa(tccore.ProductType): set_trace()
-            self.analyze_entity(value)
-            # TODO - Cycles?
+        self.analyze_entity(value)
+
+        if not value: set_trace()
+        while value.isa(tccore.Var):
+            self.analyze_var(value)
+            value = value.reference
+
+        if value.isa(tccore.Var): set_trace()
+
+        if value.isa(tccore.TypeOp):
+            # What does this mean to have a var that is referring
+            # to a type op? eg something like:
+            # a = map
+            # Can this ever happen?
+            # What should be the type of this ?
             var.inferred_type = value.inferred_type
-            var.resolved_value = value.resolved_value
+            var.reference = value
+        else:
+            if resolver.isa(tcext.Module):
+                var.inferred_type = value.inferred_type
+                var.reference = value
+            else:
+                if value.isany(tccore.Type):
+                    assert resolver.symtable.is_bound(var.fqn)
+                    var.inferred_type = value
+                    # Var wont have a value - 
+                    # unless they are specified in a module in which case they will
+                    # TODO - Unify modules as "values" instead of special case
+                    # expressions so that values never need to have resolved values.
+                else:
+                    set_trace()
+                    a = 3
+
 
     def analyze(self):
         for entry in self.entities.itervalues():
@@ -89,10 +125,6 @@ class Analyzer(object):
             self.resolvers = old_resolvers
 
     def analyze_entity(self, entry):
-        NONE = 0
-        FAILED = -1
-        STARTED = 1
-        SUCCESS = 2
         if not entry: set_trace()
         if getattr(entry, "analysis_status", NONE) in (NONE, FAILED, None):
             entry.analysis_status = STARTED
@@ -115,9 +147,10 @@ class Analyzer(object):
         self.resolvers.pop()
 
     def analyze_typeop(self, typeop):
-        self.analyze_abs(typeop)
+        # For a typeop set the inferred type up front so we dont run into
+        # trouble for recursive types
         typeop.inferred_type = tccore.make_fun_type(None, [tccore.KindType] * len(typeop.params), tccore.KindType)
-        typeop.resolved_value = typeop
+        self.analyze_abs(typeop)
         self.resolvers.pop()
 
     def analyze_funapp(self, funapp):
@@ -128,16 +161,11 @@ class Analyzer(object):
 
     def analyze_typeapp(self, typeapp):
         self.analyze_app(typeapp)
-        # Do the application and set that as the resolved value
-        typeapp.resolved_value, reduced = typeapp.reduce()
-        if typeapp.resolved_value.isany(tccore.Type):
-            typeapp.inferred_type = tccore.KindType
-        elif typeapp.resolved_value.isa(tccore.TypeOp):
-            typeop = typeapp.resolved_value
-            assert len(typeop.params) > 0, "TypeOp cannot have 0 type params"
-            typeop.inferred_type = tccore.make_fun_type(None, [tccore.KindType] * len(typeop.params), tccore.KindType)
-        else:
-            assert False
+        # Here we want to apply the type op to its arguments and get
+        # a reduced value
+        if typeapp.expr.isa(tccore.Var) and typeapp.expr.fqn not in ("list", "map"):
+            set_trace()
+        typeapp.reduced_value, reduced = typeapp.reduce()
 
     def analyze_app(self, app):
         """ Base analyzer for applications.
@@ -147,6 +175,24 @@ class Analyzer(object):
         """
         self.analyze_entity(app.expr)
         map(self.analyze_entity, app.args)
+        # ensure that the abstraction's type args match the args passed to the application
+        expr_type = app.expr.inferred_type
+        if not expr_type:
+            set_trace()
+        for index,(stype,arg) in enumerate(zip(expr_type.source_types,app.args)):
+            assert stype.isa(tccore.Ref)
+            stype = stype.contents
+            argtype = arg.inferred_type
+            if not issubtype(argtype, stype):
+                raise errors.TCException("Argument %d expects type %s but received type %s" % (index, repr(stype), repr(argtype)))
+
+        # Types match so finalise the inferred type
+        if len(app.args) > len(expr_type.source_types):
+            raise TCException("Too many arguments for fun %s" % repr(app.expr))
+        elif len(app.args) == len(expr_type.source_types):
+            app.inferred_type = expr_type.return_type.contents
+        else:
+            set_trace()
 
     def analyze_abs(self, abs):
         """ Base analyzer for abstractions.  
@@ -163,15 +209,12 @@ class Analyzer(object):
             abs.inferred_type = abs.fun_type
         else:
             self.analyze_entity(abs.expr)
-            set_trace()
-
-    def analyze_ref(self, ref):
-        self.analyze_entity(ref.contents)
-        ref.inferred_type = ref.contents.inferred_type
-        ref.resolved_value = ref.contents.resolved_value
-
-    def analyze_var(self, var):
-        self.resolve_variable(var)
+            if abs.fun_type:
+                if not issubtype(abs.expr.inferred_type, abs.fun_type):
+                    raise TCException("Abstractions %s declares return type %s but expressions returns %s" % (abs.fqn, repr(abs.expr.inferred_type), repr(abs.fun_type)))
+            else:
+                assert abs.inferred_type is not None
+                abs.fun_type = abs.inferred_type
 
     def analyze_funtype(self, funtype):
         [self.analyze_entity(t.contents) for t in funtype.source_types]
@@ -182,9 +225,8 @@ class Analyzer(object):
 
     def analyze_container_type(self, conttype):
         for ref in conttype.typerefs:
-            self.analyze_entity(ref)
+            self.analyze_entity(ref.contents)
         conttype.inferred_type = tccore.KindType
-        conttype.resolved_value = conttype
 
     def analyze_exprlist(self, exprlist):
         for expr in exprlist.children:
@@ -192,21 +234,20 @@ class Analyzer(object):
         exprlist.inferred_type = exprlist.children[-1].inferred_type
 
     def analyze_assignment(self, assignment):
+        var = assignment.expr.expr
         self.analyze_entity(assignment.expr)
         assert assignment.expr.inferred_type
         parent = self.resolvers[-1]
-        assert parent.isany(Abs)
+        assert parent.isany(tccore.Abs)
         if assignment.is_temporary:
-            parent.symbol_table.register(assignment.target.name, assignment.expr.inferred_type)
+            parent.symtable.register(assignment.target.name, assignment.expr.inferred_type)
         self.analyze_entity(assignment.target)
         # Ensure that target's type matches source expr's type
-        self.ensure_types(assignment.target.inferred_type, assignment.expr.inferred_type)
+        issubtype(assignment.target.inferred_type, assignment.expr.inferred_type)
         assignment.inferred_type = assignment.expr.inferred_type
 
 
     def analyze_index(self, index):
-        if index.key == "statusCode": 
-            set_trace()
         self.analyze_entity(index.expr)
 
         source_type = index.expr.inferred_type
