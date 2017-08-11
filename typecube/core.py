@@ -417,6 +417,9 @@ class TypeApp(Type, App):
         assert(all(t.isany(Type) or t.isa(Var) for t in args)), "All type args in a TypeApp must be Type sub classes or Vars"
 
 class AtomicType(Type):
+    def __init__(self):
+        self.inferred_type = KindType
+
     def substitute(self, bindings):
         return self
 
@@ -516,7 +519,7 @@ def make_enum_type(fqn, symbols):
         ta.expr = out
     return out
 
-KindType = make_atomic_type("kind")
+KindType = Type()
 AnyType = make_atomic_type("any")
 VoidType = make_atomic_type("void")
 
