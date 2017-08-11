@@ -56,7 +56,7 @@ class Analyzer(object):
             tcext.Index: self.analyze_index,
         }
 
-    def analyze_var(self, var):
+    def analyze_var(self, var, visited):
         """ Resolves a name or a fqn given our current environment/resovler stack. """
         resolved_value = None
         for i in xrange(len(self.resolvers) - 1, -1, -1):
@@ -69,6 +69,8 @@ class Analyzer(object):
         if not resolved_value:
             raise errors.TCException("Cannot resolve '%s'" % var.fqn)
 
+        thisentry = (id(resolver), var.fqn)
+        new_visited = visited | {thisentry}
 
         # When resolving a variable entry a few things have to be considered:
         # 1. Who is resolving this variable?  Is it a module or a function?
@@ -77,14 +79,12 @@ class Analyzer(object):
         # 3. If the binder is a function then is the function the immediate 
         #    parent or do we need to consider upvals/closures?
         var.binder = resolver
-        self.analyze_entity(value)
+        self.analyze_entity(value, new_visited)
 
         if not value: set_trace()
         while value.isa(tccore.Var):
-            self.analyze_var(value)
-            value = value.reference
-
-        if value.isa(tccore.Var): set_trace()
+            self.analyze_var(value, new_visited)
+            value = value.resolved_value
 
         if value.isa(tccore.TypeOp):
             # What does this mean to have a var that is referring
@@ -93,22 +93,22 @@ class Analyzer(object):
             # Can this ever happen?
             # What should be the type of this ?
             var.inferred_type = value.inferred_type
-            var.reference = value
+            var.resolved_value = value
         else:
             if resolver.isa(tcext.Module):
                 var.inferred_type = value.inferred_type
-                var.reference = value
+                var.resolved_value = value
+            elif value.isany(tccore.Type):
+                assert resolver.symtable.is_bound(var.fqn)
+                var.inferred_type = value
+                var.is_typevar = True
+                # Var wont have a value - 
+                # unless they are specified in a module in which case they will
+                # TODO - Unify modules as "values" instead of special case
+                # expressions so that values never need to have resolved values.
             else:
-                if value.isany(tccore.Type):
-                    assert resolver.symtable.is_bound(var.fqn)
-                    var.inferred_type = value
-                    # Var wont have a value - 
-                    # unless they are specified in a module in which case they will
-                    # TODO - Unify modules as "values" instead of special case
-                    # expressions so that values never need to have resolved values.
-                else:
-                    set_trace()
-                    a = 3
+                set_trace()
+                a = 3
 
 
     def analyze(self):
@@ -120,61 +120,55 @@ class Analyzer(object):
                 self.resolvers = [self.global_module]
                 if parts:
                     self.resolvers.append(self.global_module.get(parts))
-            self.analyze_entity(entry)
+            self.analyze_entity(entry, set())
             # reset resolvers
             self.resolvers = old_resolvers
 
-    def analyze_entity(self, entry):
+    def analyze_entity(self, entry, visited):
         if not entry: set_trace()
         if getattr(entry, "analysis_status", NONE) in (NONE, FAILED, None):
             entry.analysis_status = STARTED
-            self.analyzers[type(entry)](entry)
-            if not hasattr(entry, "inferred_type"):
+            self.analyzers[type(entry)](entry, visited)
+            if not entry.inferred_type:
                 entry.analysis_status = FAILED
                 set_trace()
-                assert entry.inferred_type is not None
             entry.analysis_status = SUCCESS
 
-    def analyze_module(self, entry):
+    def analyze_module(self, entry, visited):
         map(self.analyze_entity, entry.child_entities)
 
-    def analyze_fun(self, fun):
-        self.analyze_abs(fun)
+    def analyze_fun(self, fun, visited):
+        self.analyze_abs(fun, visited)
         self.resolvers.pop()
 
-    def analyze_quant(self, quant):
-        self.analyze_abs(quant)
+    def analyze_quant(self, quant, visited):
+        self.analyze_abs(quant, visited)
         self.resolvers.pop()
 
-    def analyze_typeop(self, typeop):
+    def analyze_typeop(self, typeop, visited):
         # For a typeop set the inferred type up front so we dont run into
         # trouble for recursive types
         typeop.inferred_type = tccore.make_fun_type(None, [tccore.KindType] * len(typeop.params), tccore.KindType)
-        self.analyze_abs(typeop)
+        self.analyze_abs(typeop, visited)
         self.resolvers.pop()
 
-    def analyze_funapp(self, funapp):
-        self.analyze_app(funapp)
+    def analyze_funapp(self, funapp, visited):
+        self.analyze_app(funapp, visited)
 
-    def analyze_quantapp(self, quantapp):
-        self.analyze_app(quantapp)
+    def analyze_quantapp(self, quantapp, visited):
+        self.analyze_app(quantapp, visited)
 
-    def analyze_typeapp(self, typeapp):
-        self.analyze_app(typeapp)
-        # Here we want to apply the type op to its arguments and get
-        # a reduced value
-        if typeapp.expr.isa(tccore.Var) and typeapp.expr.fqn not in ("list", "map"):
-            set_trace()
-        typeapp.reduced_value, reduced = typeapp.reduce()
+    def analyze_typeapp(self, typeapp, visited):
+        self.analyze_app(typeapp, visited)
 
-    def analyze_app(self, app):
+    def analyze_app(self, app, visited):
         """ Base analyzer for applications.
         1. Analyze expression and arguments.
         2. Ensure types of arguments match function signature 
         3. Checking currying semantics.
         """
-        self.analyze_entity(app.expr)
-        map(self.analyze_entity, app.args)
+        self.analyze_entity(app.expr, visited)
+        [self.analyze_entity(a, visited) for a in app.args]
         # ensure that the abstraction's type args match the args passed to the application
         expr_type = app.expr.inferred_type
         if not expr_type:
@@ -194,66 +188,74 @@ class Analyzer(object):
         else:
             set_trace()
 
-    def analyze_abs(self, abs):
+        if app.expr.isany(tccore.App):
+            # Here dont reduce it but just "collapse" multiple apps into one.
+            # All Apps are kept just in the form (A b c d)
+            set_trace()
+
+    def analyze_abs(self, abs, visited):
         """ Base analyzer for abstractions.  
         1. Analyze child expression
         2. Ensure function return type is same as expression inferred type.
         """
         # Add the abs to our resolver stack first (the caller of this method will pop it off)
+        if abs.fqn == 'apizen.common.models.Transformers.Http2AZValueResponse': set_trace()
+        abs.resolved_value = abs
         self.resolvers.append(abs)
         if not abs.expr:
             # We have no expression, so set inferred_type to fun_type
             if not abs.fun_type:
                 raise errors.TCException("Abstraction '%s' has neither a fun_type or expression to infer types from" % abs.fqn)
-            self.analyze_entity(abs.fun_type)
+            self.analyze_entity(abs.fun_type, visited)
             abs.inferred_type = abs.fun_type
         else:
-            self.analyze_entity(abs.expr)
+            self.analyze_entity(abs.expr, visited)
             if abs.fun_type:
                 if not issubtype(abs.expr.inferred_type, abs.fun_type):
                     raise TCException("Abstractions %s declares return type %s but expressions returns %s" % (abs.fqn, repr(abs.expr.inferred_type), repr(abs.fun_type)))
+                abs.inferred_type = abs.fun_type
             else:
+                if abs.inferred_type is None: set_trace()
                 assert abs.inferred_type is not None
                 abs.fun_type = abs.inferred_type
 
-    def analyze_funtype(self, funtype):
-        [self.analyze_entity(t.contents) for t in funtype.source_types]
+    def analyze_funtype(self, funtype, visited):
+        [self.analyze_entity(t.contents, visited) for t in funtype.source_types]
         if funtype.return_type:
-            self.analyze_entity(funtype.return_type.contents)
+            self.analyze_entity(funtype.return_type.contents, visited)
         funtype.inferred_type = tccore.KindType
         funtype.resolved_value = funtype
 
-    def analyze_container_type(self, conttype):
-        for ref in conttype.typerefs:
-            self.analyze_entity(ref.contents)
+    def analyze_container_type(self, conttype, visited):
         conttype.inferred_type = tccore.KindType
+        for ref in conttype.typerefs:
+            self.analyze_entity(ref.contents, visited)
 
-    def analyze_exprlist(self, exprlist):
+    def analyze_exprlist(self, exprlist, visited):
         for expr in exprlist.children:
-            self.analyze_entity(expr)
+            self.analyze_entity(expr, visited)
         exprlist.inferred_type = exprlist.children[-1].inferred_type
 
-    def analyze_assignment(self, assignment):
+    def analyze_assignment(self, assignment, visited):
         var = assignment.expr.expr
-        self.analyze_entity(assignment.expr)
+        self.analyze_entity(assignment.expr, visited)
         assert assignment.expr.inferred_type
         parent = self.resolvers[-1]
         assert parent.isany(tccore.Abs)
         if assignment.is_temporary:
             parent.symtable.register(assignment.target.name, assignment.expr.inferred_type)
-        self.analyze_entity(assignment.target)
+        self.analyze_entity(assignment.target, visited)
         # Ensure that target's type matches source expr's type
         issubtype(assignment.target.inferred_type, assignment.expr.inferred_type)
         assignment.inferred_type = assignment.expr.inferred_type
 
-
-    def analyze_index(self, index):
-        self.analyze_entity(index.expr)
+    def analyze_index(self, index, visited):
+        self.analyze_entity(index.expr, visited)
 
         source_type = index.expr.inferred_type
         while source_type.isa(tccore.Ref):
             source_type = source_type.contents
-        self.analyze_entity(source_type)
+        self.analyze_entity(source_type, visited)
         if source_type.isany(tccore.ContainerType):
             if type(index.key) in (str, unicode):
                 assert index.expr.inferred_type.is_labelled
@@ -261,9 +263,19 @@ class Analyzer(object):
             else:
                 assert type(index.index) in (int, long)
                 index.inferred_type = source_type.type_at_index(index.key)
+        elif source_type.isa(tccore.TypeApp):
+            # A type application must first be reduced by applying its arguments to the
+            # Type operator as here variables need to be bound.
+            # We have a type application over a particular param so instead of reducing
+            # the app via a substitution, just walk down the type with the param bindings
+            # This is an opportunity for us to add a "constraint" to the type argument 
+            # if it happens to be a type var.  The constraint would be "MustHaveField(key)"
+            starting_type = source_type.expr.resolved_value.expr
+            assert starting_type.isany(tccore.ContainerType)
+            set_trace()
         else:
             set_trace()
 
-    def analyze_atomic_type(self, atomic):
+    def analyze_atomic_type(self, atomic, visited):
         atomic.inferred_type = tccore.KindType
         atomic.resolved_value = atomic

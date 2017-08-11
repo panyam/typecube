@@ -20,12 +20,9 @@ class Macro(Expr):
     and Applications but let us extend other constructs (like loops, 
     switch cases, conditionals, pattern matching and so on).
     """
-    def __init__(self):
-        Expr.__init__(self)
-
-    def infer_type(self):
-        """ Called to infer the type of this expression based on its
-        child expression structure. """
+    @property
+    def expressions(self):
+        """ Gets the underlying expression using only core terms that represents this macro. """
         pass
 
 class MatchExp(Expr):
@@ -74,51 +71,6 @@ class Assignment(Expr):
         return Assignment(self.target.clone(), self.expr.beta_reduce(bindings))
 
     def _reduce(self):
-        return self
-
-class Literal(Expr):
-    """
-    An expr that contains a literal value like a number, string, boolean, list, or map.
-    """
-    def __init__(self, value, value_type):
-        Expr.__init__(self)
-        self.value = value
-        self.value_type = value_type
-
-    def beta_reduce(self, bindings):
-        return Literal(self, value, self.value_type)
-
-    def resolve(self, resolver):
-        return self
-
-    def __repr__(self):
-        return "<Literal(0x%x), Value: %s>" % (id(self), str(self.value))
-
-class ExprList(Expr):
-    """ A list of statements. """
-    def __init__(self, children = None):
-        Expr.__init__(self)
-        self.children = children or []
-
-    def beta_reduce(self, bindings):
-        return ExprList([c.beta_reduce(bindings) for c in self.children])
-
-    def add(self, expr):
-        if not issubclass(expr.__class__, Expr):
-            ipdb.set_trace()
-            assert issubclass(expr.__class__, Expr), "Cannot add non Expr instances to an ExprList"
-        self.children.append(expr)
-
-    def extend(self, another):
-        if type(another) is ExprList:
-            self.children.extend(another.children)
-        else:
-            self.add(another)
-
-    def _reduce(self):
-        resolved_exprs = [expr.resolve() for expr in self.children]
-        if any(x != y for x,y in zip(self.children, resolved_exprs)):
-            return ExprList(resolved_exprs)
         return self
 
 class DictExpr(Expr):

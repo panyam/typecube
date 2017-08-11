@@ -27,16 +27,6 @@ class Expr(Annotatable):
     def reduce_once(self):
         return self, False
 
-    @property
-    def free_variables(self):
-        if self._free_variables is None:
-            self._free_variables = self.eval_free_variables()
-        return self._free_variables
-
-    def eval_free_variables(self):
-        set_trace()
-        assert False, "Not implemented"
-
     def isany(self, cls):
         return isinstance(self, cls)
 
@@ -55,6 +45,18 @@ class Type(Expr):
     @property
     def name(self):
         return self.fqn.split(".")[-1]
+
+class Literal(Expr):
+    """ An expr that contains a literal value like a number, string, boolean, list, or map.  """
+    def __init__(self, value, value_type):
+        Expr.__init__(self)
+        self.value = value
+        self.value_type = value_type
+        self.inferred_type = value_type
+        self.resolved_value = self
+
+    def __repr__(self):
+        return "<0x%x - Lit: '%s'>" % (id(self), self.value)
 
 class Var(Expr):
     """ An occurence of a name that can be bound to a value, a field or a type. """
@@ -83,17 +85,32 @@ class Var(Expr):
             return res.clone(), True
         return Var(self.fqn), False
 
-    def eval_free_variables(self):
-        if "." in self.fqn:
-            return {self.fqn.split(".")[0]}
-        else:
-            return {self.fqn}
-
     def clone(self):
         return Var(self.fqn)
 
     def __repr__(self):
         return "<0x%x - Var: '%s'>" % (id(self), self.fqn)
+
+class ExprList(Expr):
+    """ A list of expressions. """
+    def __init__(self, children = None):
+        Expr.__init__(self)
+        self.children = children or []
+
+    def reduce(self, bindings):
+        return ExprList([c.reduce(bindings) for c in self.children])
+
+    def add(self, expr):
+        if not issubclass(expr.__class__, Expr):
+            ipdb.set_trace()
+            assert issubclass(expr.__class__, Expr), "Cannot add non Expr instances to an ExprList"
+        self.children.append(expr)
+
+    def extend(self, another):
+        if type(another) is ExprList:
+            self.children.extend(another.children)
+        else:
+            self.add(another)
 
 class SymbolTable(object):
     """ A symbol table for a particular abstraction.
@@ -188,7 +205,7 @@ class Abs(Expr):
         # Calculate all free vars in the arguments
         arg_free_vars = set()
         for arg in args:
-            arg_free_vars = arg_free_vars.union(arg.free_variables)
+            arg_free_vars = arg_free_vars.union(free_variables(arg))
 
         param_bindings = self.eval_param_renames(arg_free_vars)
         this = self.rename_params(**param_bindings)
@@ -252,7 +269,7 @@ class Abs(Expr):
         Given a bunch of free variables, returns any renamings required off this
         abstraction's bound variables such that the renamed values do not fall in the set of free variables of this expression or the free variables provided.
         """
-        our_free_vars = self.free_variables
+        our_free_vars = free_variables(self)
         param_bindings = {}
         for y in self.bound_params():
             if y in freevars:
@@ -262,18 +279,6 @@ class Abs(Expr):
                         break
                 assert param_bindings[y], "Param '%s' could not be renamed" % y
         return param_bindings
-
-    def eval_free_variables(self):
-        out = self.expr.free_variables
-        for param in self.params:
-            if param in out:
-                out.remove(param)
-        if self.return_param in out:
-            out.remove(return_param)
-        for param in self.param_types.keys():
-            if param in out:
-                out.remove(param)
-        return out
 
     @property
     def name(self):
@@ -311,13 +316,7 @@ class Abs(Expr):
 
 class Fun(Abs):
     """ An abstraction over expressions.  """
-    def _reduce(self):
-        new_fun_type = self.fun_type.resolve()
-        resolved_expr = None if not self.expr else self.expr.resolve()
-        if new_fun_type == self.fun_type and resolved_expr == self.expr:
-            return self
-        out = Fun(self.params, resolved_expr, self.fqn, new_fun_type)
-        return out
+    pass
 
 class Quant(Abs):
     """ A quantification or a generic function.
@@ -325,20 +324,24 @@ class Quant(Abs):
     Unlike normal functions (abstractions), which take terms/expressions as arguments, a Quantification takes types arguments
     and returns an expression with the arguments substituted with the types.
     """
-    def __init__(self, params, expr, fqn = None):
-        fun_type = None # make_fun_type(None, [KindType] * len(params), KindType)
+    def __init__(self, params, expr, fqn = None, fun_type = None):
         Abs.__init__(self, params, expr, fqn, fun_type)
         # Set the values of params in the symbol table as we know source types.
-        # We just dont konw the return type
+        # We just dont know the return type
         for param in self.params:
             self.symtable.variables[param] = Ref(KindType)
+        self.cases = []
 
-    def _reduce(self):
-        resolved_expr = None if not self.expr else self.expr.resolve()
-        if resolved_expr == self.expr:
-            return self
-        out = Quant(self.params, resolved_expr, self.fqn, self.fun_type)
-        return out
+    def addcase(self, case):
+        """ Adds a new specialization of this quanitifer.
+
+        A case contains (type_values, expr) which indicates the values for the type params
+        along with a function or a variable pointing to a function that handles this case.
+        """
+        type_values, expr = case
+        assert self.expr is None, "Cannot specialize a quantifier that already has a body."
+        assert len(type_values) == len(self.params), "Partial quantifer specialization not yet allowed."
+        self.cases.append(case)
 
 class TypeOp(Abs):
     """ Type operators are "functions" over types.  
@@ -357,47 +360,34 @@ class TypeOp(Abs):
             for param in self.params:
                 self.symtable.variables[param] = Ref(KindType)
 
-    def _reduce(self):
-        resolved_expr = None if not self.expr else self.expr.resolve()
-        if resolved_expr == self.expr:
-            return self
-        out = Quant(self.params, resolved_expr, self.fqn, self.fun_type)
-        return out
-
 class App(Expr):
     """ Base of all application expressions. """
-    def __init__(self, expr, args):
+    def __init__(self, expr, *args):
         Expr.__init__(self)
         if type(expr) in (str, unicode): expr = Var(expr)
         self.expr = expr
-
-        if args and type(args) is not list: args = [args]
-        for i,arg in enumerate(args):
-            if type(arg) in (str, unicode): arg = Var(arg)
-            if not isinstance(arg, Expr): set_trace()
-        self.args = args
-
-    def eval_free_variables(self):
-        out = set(self.expr.free_variables)
-        for arg in self.args:
-            out = out.union(arg.free_variables)
-        return out
+        if not all([(type(arg) in (str, unicode) or isinstance(arg, Expr)) for arg in args]):
+            set_trace()
+            assert(all([(type(arg) in (str, unicode) or isinstance(arg, Expr)) for arg in args]))
+        self.args = [Var(arg) if type(arg) in (str, unicode) else arg for arg in args]
 
     def __repr__(self):
-        return "<0x%x - %s - %s (%s)>" % (id(self), self.__class__.__name__, repr(self.expr), ", ".join(map(repr, self.args)))
+        return "<0x%x - %s - %s (%s)>" % (id(self), self.__class__.__name__, repr(self.expr), repr(self.args))
 
     def clone(self):
-        return self.__class__(self.expr.clone(), [arg.clone() for arg in self.args])
+        return self.__class__(self.expr.clone(), *[arg.clone() for arg in self.args])
 
     def reduce_once(self):
-        fun, fun_reduced = self.expr.reduce()
+        fun, fun_reduced = self.expr.resolved_value, self.expr.resolved_value != self.expr
+        assert fun and fun.isany(Abs)
+        set_trace()
         args,args_reduced = map(list, zip(*[a.reduce() for a in self.args]))
         if fun.isany(Abs) and not fun.is_external:
             # we are good, we can apply
             return fun.apply(args), True
         elif any([fun_reduced] + args_reduced):
             # Atleast one of fun or an arg was reducible so mark as progress
-            return self.__class__(fun, args), True
+            return self.__class__(fun, *args), True
         else:
             # Nothing could be reduced so return ourselves
             return self, False
@@ -406,36 +396,25 @@ class App(Expr):
         fun,fun_reduced = self.expr.substitute(bindings)
         args,args_reduced = map(list, zip(*[arg.substitute(bindings) for arg in self.args]))
         reduced = fun_reduced or any(args_reduced)
-        return self.__class__(fun, args), reduced
+        return self.__class__(fun, *args), reduced
 
-class FunApp(App):
-    pass
+class FunApp(App): pass
 
 class QuantApp(App):
     """ Application of a quantification to type expressions. """
-    def resolve_function(self):
-        fun, args = App.resolve_function(self)
-        if not fun.isa(Quant):
-            raise errors.TCException("'%s' is not a type operator" % typefun)
-        return fun,args
+    pass
 
 class TypeApp(Type, App):
     """ Application of a type operator. 
     Unlike quantifications or functions, this returns a type when types are 
     passed as arguments.
     """
-    def __init__(self, expr, args):
+    def __init__(self, expr, *args):
         if type(expr) in (str, unicode):
             expr = make_type_var(expr)
-        App.__init__(self, expr, args)
+        App.__init__(self, expr, *args)
         Type.__init__(self, None)
         assert(all(t.isany(Type) or t.isa(Var) for t in args)), "All type args in a TypeApp must be Type sub classes or Vars"
-
-    def resolve_function(self):
-        fun, args = App.resolve_function(self)
-        if not fun.isa(TypeOp):
-            raise errors.TCException("'%s' is not a type operator" % typefun)
-        return fun,args
 
 class AtomicType(Type):
     def substitute(self, bindings):
@@ -523,8 +502,8 @@ def make_type_op(fqn, type_params, expr):
 def make_type_var(target_fqn):
     return Var(target_fqn)
 
-def make_type_app(expr, typeargs):
-    return TypeApp(expr, typeargs)
+def make_type_app(expr, *typeargs):
+    return TypeApp(expr, *typeargs)
 
 def make_enum_type(fqn, symbols):
     typeargs = []
@@ -575,3 +554,30 @@ def eprint(expr, level = 0):
         return "\(%s) { %s }" % (", ".join(expr.params), eprint(expr.expr))
     assert False
 
+
+def free_variables(expr):
+    if expr._free_variables is None:
+        if expr.isa(Var):
+            if "." in expr.fqn:
+                expr._free_variables = {expr.fqn.split(".")[0]}
+            else:
+                expr._free_variables = {expr.fqn}
+        elif expr.isany(Abs):
+            out = free_variables(expr.expr)
+            for param in expr.params:
+                if param in out:
+                    out.remove(param)
+            if expr.return_param in out:
+                out.remove(return_param)
+            for param in expr.param_types.keys():
+                if param in out:
+                    out.remove(param)
+            expr._free_variables = out
+        elif expr.isany(App):
+            out = set(free_variables(expr.expr))
+            for arg in expr.args:
+                out = out.union(free_variables(arg))
+            expr._free_variables = out
+        else:
+            assert False
+    return expr._free_variables
