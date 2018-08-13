@@ -2,7 +2,6 @@
 from enum import Enum
 from ipdb import set_trace
 from collections import defaultdict
-from itertools import izip
 from typecube import errors
 from typecube.annotations import Annotatable, Annotation
 
@@ -545,7 +544,7 @@ def equiv(expr1, expr2, mapping12 = None, mapping21 = None):
                 equiv(expr1.expr, expr2.expr, mapping12, mapping21)
     elif isinstance(expr1, App):
         return equiv(expr1.expr, expr2.expr, mapping12, mapping21) and \
-                all(equiv(t1, t2, mapping12, mapping21) for t1,t2 in izip(expr1.args, expr2.args))
+                all(equiv(t1, t2, mapping12, mapping21) for t1,t2 in zip(expr1.args, expr2.args))
     assert False, "Unknown type"
 
 def eprint(expr, level = 0):

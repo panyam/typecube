@@ -84,7 +84,7 @@ class DictExpr(Expr):
         return DictExpr([k.beta_reduce(bindings) for k in self.keys], [v.beta_reduce(bindings) for v in self.values])
 
     def _reduce(self):
-        for key,value in izip(self.keys, self.values):
+        for key,value in zip(self.keys, self.values):
             key.resolve()
             value.resolve()
 

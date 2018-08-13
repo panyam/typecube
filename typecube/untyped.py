@@ -1,5 +1,4 @@
 import ipdb
-from itertools import izip
 from collections import defaultdict
 
 def equiv(term1, term2, mapping12 = None, mapping21 = None):
@@ -24,7 +23,7 @@ def equiv(term1, term2, mapping12 = None, mapping21 = None):
         return equiv(term1.term, term2.term, mapping12, mapping21)
     else:
         return len(term1.terms) == len(term2.terms) and \
-                all(equiv(t1, t2, mapping12, mapping21) for t1,t2 in izip(term1.terms, term2.terms))
+                all(equiv(t1, t2, mapping12, mapping21) for t1,t2 in zip(term1.terms, term2.terms))
 
 def normalize_term(term):
     if issubclass(term.__class__, Term):
