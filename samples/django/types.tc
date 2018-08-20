@@ -1,0 +1,197 @@
+
+namespace onering.django.types {
+    atomic Any
+    atomic boolean
+    atomic int
+    atomic string
+
+    // We can perhaps do one of two things. 
+    // Treat django field types as just records and define each Field type 
+    // as a record with a bunch of fields (see below)
+    // OR
+    // we could treat each field as an atomic and add a bunch of annotations to it like so:
+    @allowed_annotations(null : boolean, blank : boolean, choices : array<(string, string)>?,
+                         db_column : string?, index : boolean = false, default : Any?,
+                         editable : boolean = True, error_messages : map<string, string>?,
+                         help_text : string = "", primary_key : boolean = false, 
+                         unique : boolean = false, verbose_name : string?)
+    atomic Field
+
+    // BUT the above is totally crazy syntax in an annotation.  SOOOOO do this instead:
+    record FieldAnnotations {
+        null : boolean = false
+        blank : boolean = false
+        choices : array<(string, string)>?
+        db_column : string?
+        index : boolean = false
+        default : Any?
+        editable : boolean = True
+        error_messages : map<string, string>?
+        help_text : string = ""
+        primary_key : boolean = false
+        unique : boolean = false
+        verbose_name : string?
+        // Commented out because this can be treated with annotations
+        // validators : string?
+    }
+    @allowed_annotations(FieldAnnotations)
+    atomic Field
+
+    # Or alternatively a Field is just a base class
+    record Field {
+        null : boolean = false
+        blank : boolean = false
+        choices : array<(string, string)>?
+        db_column : string?
+        index : boolean = false
+        default : Any?
+        editable : boolean = True
+        error_messages : map<string, string>?
+        help_text : string = ""
+        primary_key : boolean = false
+        unique : boolean = false
+        verbose_name : string?
+        // Commented out because this can be treated with annotations
+        // validators : string?
+    }
+
+    // But what is the point of a Field type?
+    // A Field is supposed to indicate a type, so when i declare a field of type Field, it should create me
+    // a type annotation which does not happen, eg:
+    
+    // if we do this, we are saying name is of type StringField - but how about all its validators?
+    name : StringField
+
+    // So if we do the following, this is actually "intantiating" a StringField object, 
+    // instead this instantiation should create a type whose "parameters" are null, default etc set.
+    name : StringField(null = false, default = "", unique = False)
+
+    // WAIT A MINUTE - are we creating higher order types?  Should we need something like:
+    order 2 record Field {
+        // attributes like above
+    }
+    // AND THE INSTANTIATION OF order N type creates a type that is of order N - 1.  
+    // Order 0 is actual object instancers
+    // What does an order higher than 2 even do?  eg if we did:
+    order 3 record Field3 {
+        name : String
+    }
+    
+    // Can higher order types be ONLY records?  or can they be anything, can we have:
+    order 2
+
+    record AutoField : Field {
+        primary_key : boolean = false
+    }
+
+    record BigAutoField : Field {
+        primary_key : boolean = false
+    }
+
+    record BooleanField : Field {
+    }
+
+    record CharField : Field { max_length : int }
+
+    record DateField : Field {
+        auto_now : boolean = false
+        auto_now_add : boolean = false
+        unique_for_date : boolean = false
+    }
+
+    record DateTimeFieldCommon : Field {
+        auto_now : boolean = false
+        auto_now_add : boolean = false
+        unique_for_date : boolean = false
+        unique_for_year : boolean = false
+    }
+
+    record DateField : DateTimeField {
+    }
+    record DateTimeField : DateTimeField {
+    }
+
+    record DecimalField : Field {
+        max_digits : int?
+        decimal_places : int?
+    }
+
+    record DurationField : Field { }
+
+    record EmailField : Field {
+        max_length : int?
+    }
+
+    record FileField : Field {
+        max_length : int?
+        upload_to : string?
+    }
+
+    record FileField : Field {
+        max_length : int?
+        upload_to : string?
+    }
+
+    record FilePathField : Field {
+        max_length : int?
+        path: string?
+        match: string?
+        recursive : boolean = false
+    }
+
+    record FloatField : Field { }
+    record ImageField : Field {
+        upload_to : string?
+        height_field : string?
+        width_field : string?
+    }
+    record IntegerField : Field { }
+    record GenericIPAddressField : Field {
+        protocol : string = "both"
+        unpack_ipv4 : boolean = false
+    }
+    record PositiveIntegerField : Field { }
+    record PositiveSmallIntegerField : Field { }
+    record SlugField : Field { max_length : int  = 50 }
+    record SmallIntegerField : Field { }
+    record TextField : Field { }
+    record TimeField : Field {
+        auto_now : boolean = false
+        auto_now_add : boolean = false
+    }
+    record URLField : Field { max_length : int = 200 }
+    record UUIDField : Field { }
+
+    record <T> ForeignKey : Field {
+        to : T
+        on_delete : enum {
+            CASCADE
+            PROTECT
+            SET_NULL
+            SET_DEFAULT
+            SET
+            DO_NOTHING
+        }
+        limit_choices_to : map<string, Any>?
+        related_name : string?
+        related_query_name : string?
+        to_field : string?
+        db_constraint : string?
+        swappable : boolean = false
+    }
+
+    record <T> OneToOneField : ForeignKey<T> {
+        parent_link : boolean = false
+    }
+
+    record <T> ManyToManyField : Field {
+        limit_choices_to : map<string, Any>?
+        related_name : string?
+        related_query_name : string?
+        through : string?
+        through_fields : array<string>?
+        db_table : string?
+        db_constraint : string?
+        symmetrical : boolean = True
+    }
+}
