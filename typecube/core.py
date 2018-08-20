@@ -1,10 +1,14 @@
 
 class Type(object):
-    def __init__(self, label, param_names = None):
-        self.label = label
+    def __init__(self, param_names = None):
         self.param_names = param_names or []
         self.validator = self.default_validator
         self.docs = ""
+        self.label = ""
+
+    def set_label(self, label):
+        self.label = label
+        return self
 
     def set_docs(self, docs):
         self.docs = docs
@@ -59,12 +63,13 @@ class ContainerType(Type):
         Product types (Records, Tuples, Named tuples etc) and 
         Sum types (Eg Unions, Enums (Tagged Unions), Algebraic Data Types.
     """
-    def __init__(self, label, param_names = None):
-        Type.__init__(self, label, param_names)
+    def __init__(self, param_names = None):
+        Type.__init__(self, param_names)
         self.children = []
 
-    def add_children(self, fields):
-        for f in fields: self.add_child(f)
+    def add_children(self, *fields):
+        for f in fields:
+            self.add_child(f)
         return self
 
     def add_child(self, field):
@@ -73,21 +78,27 @@ class ContainerType(Type):
         self.children.append(field)
         return self
 
+class TaggedType(ContainerType):
+    """ A tagged type is a type constructor that can have 0 or more (unnamed) parameters.
+    This is very much like a record type but the children are unnamed.
+    This is also like a tuple type but unlike a tuple type this type has 
+    a "first class" name.
+    """
+    def __init__(self, param_names = None, children = None):
+        ContainerType.__init__(self, param_names)
+        self.add_children(children)
+
 class RecordType(ContainerType):
-    def __init__(self, label, param_names = None):
-        ContainerType.__init__(self, label, param_names)
+    def __init__(self, param_names = None):
+        ContainerType.__init__(self, param_names)
 
 class TupleType(ContainerType):
-    def __init__(self, label, param_names = None):
-        ContainerType.__init__(self, label, param_names)
+    def __init__(self, param_names = None):
+        ContainerType.__init__(self, param_names)
 
 class UnionType(ContainerType):
-    def __init__(self, label, param_names = None):
-        ContainerType.__init__(self, label, param_names)
-
-class EnumType(ContainerType):
-    def __init__(self, label, param_names = None):
-        ContainerType.__init__(self, label, param_names)
+    def __init__(self, param_names = None):
+        ContainerType.__init__(self, param_names)
 
 class FunctionType(Type):
     input_types = None
