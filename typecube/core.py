@@ -54,7 +54,7 @@ class NativeType(Type):
 class Field(object):
     """ Each child type in a container type is captured in a TypeField. """
     def __init__(self, field_type, name = None):
-        self.field_type = type
+        self.field_type = field_type
         self.name = name
 
 class ContainerType(Type):

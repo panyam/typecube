@@ -21,6 +21,9 @@ def type_check(thetype, data, bindings = None):
     elif isinstance(thetype, core.TypeApp):
         # Type applications are tricky.  These will "affect" bindings
         assert False
+    elif isinstance(thetype, core.TypeVar):
+        # Find the binding for this type variable
+        assert False
 
     # Finally apply any other validators that were nominated 
     # specifically for that particular type

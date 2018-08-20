@@ -18,4 +18,4 @@ def test_record_creation():
             Field(TypeVar("F"), "first"),
             Field(TypeVar("S"), "second")).set_label("Pair")
     set_trace()
-    print("Here")
+    checkers.type_check(Pair, {'first': 1, 'second': 2})
