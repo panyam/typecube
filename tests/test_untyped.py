@@ -2,7 +2,7 @@
 from typecube.untyped import *
 
 def test_var():
-    print "Var(x) = ", str(Var("x"))
+    print("Var(x) = ", str(Var("x")))
 
 def test_freevariables():
     assert len(Var("x").free_variables) == 1
@@ -25,11 +25,11 @@ def test_freevariables():
     fv = Abs("x", Abs("y", Abs("f", App("f", "x")))).substitute("x", "z")
 
     fv = Abs("x", Abs("f", Abs("x", App("f", "x")))).substitute("x", "z")
-    print "FV: ", fv
+    print("FV: ", fv)
 
 def test_abstraction():
-    print "\\x: x = ", str(Abs("x", "x"))
-    print "\\x: \\y: x y = ", str(Abs("x", Abs("y", App("x", "y"))))
+    print("\\x: x = ", str(Abs("x", "x")))
+    print("\\x: \\y: x y = ", str(Abs("x", Abs("y", App("x", "y")))))
 
 def test_reduce():
     v = Var("x")
@@ -75,12 +75,12 @@ def test_equiv():
     # assert equiv(Abs("x", Abs("x", App("x", "z"))), Abs("a", Abs("b", App("b", "c"))))
 
 def test_application():
-    print "\\x: x y = ", str(Abs("x", Var("x")).substitute("x", "y"))
+    print("\\x: x y = ", str(Abs("x", Var("x")).substitute("x", "y")))
     term = App(Abs("x", Abs("y", App("x", "y"))), "z")
-    print "(\\x: \\y: x y) z = ", term
-    print "(\\x: \\y: x y) z - Reduced = ", str(term.reduce())
+    print("(\\x: \\y: x y) z = ", term)
+    print("(\\x: \\y: x y) z - Reduced = ", str(term.reduce()))
     term = App(Abs("x", Abs("y", App("x", "y"))), "z", "w")
-    print "(\\x: \\y: x y) z w - Reduced Twice = ", str(term.reduce())
+    print("(\\x: \\y: x y) z w - Reduced Twice = ", str(term.reduce()))
 
 def test_booleans():
     v = Var("v")

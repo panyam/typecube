@@ -28,7 +28,7 @@ def equiv(term1, term2, mapping12 = None, mapping21 = None):
 def normalize_term(term):
     if issubclass(term.__class__, Term):
         return term
-    elif type(term) in (str, unicode):
+    elif type(term) is str:
         return Var(term)
     ipdb.set_trace()
     assert False
@@ -86,12 +86,12 @@ class Var(Term):
 class Abs(Term):
     def __init__(self, varnames, term):
         Term.__init__(self)
-        if type(varnames) in (str, unicode):
+        if type(varnames) is str:
             varnames = [varnames]
         N = len(varnames)
         self.varname = varnames[0]
         out = normalize_term(term)
-        for i in xrange(N - 1, 0, -1):
+        for i in range(N - 1, 0, -1):
             out = Abs(varnames[i], out)
         self.term = out
 

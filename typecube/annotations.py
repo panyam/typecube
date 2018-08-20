@@ -1,7 +1,6 @@
 import ipdb
 import traceback
 import pprint
-import cStringIO
 from collections import defaultdict
 
 class Annotatable(object):

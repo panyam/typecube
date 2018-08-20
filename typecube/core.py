@@ -37,8 +37,8 @@ class Type(Expr):
     def __init__(self, fqn):
         Expr.__init__(self)
         if fqn:
-            if type(fqn) not in (str, unicode): set_trace()
-            assert type(fqn) in (str, unicode)
+            if type(fqn) is not str: set_trace()
+            assert type(fqn) is str
         self.fqn = fqn
 
     @property
@@ -62,8 +62,7 @@ class Var(Expr):
     def __init__(self, fqn, is_typevar = False):
         Expr.__init__(self)
         if fqn:
-            if type(fqn) not in (str, unicode): set_trace()
-            assert type(fqn) in (str, unicode)
+            assert type(fqn) is str
         self.fqn = fqn
         self.is_typevar = is_typevar
         # The depth (or static depth or the de bruijn index) is the distance 
@@ -80,7 +79,7 @@ class Var(Expr):
     def substitute(self, bindings):
         res = bindings.get(self.fqn, None)
         if res:
-            if type(res) in (str, unicode): return Var(res), True
+            if type(res) is str: return Var(res), True
             return res.clone(), True
         return Var(self.fqn), False
 
@@ -167,9 +166,9 @@ class Abs(Expr):
     def __init__(self, params, expr, fqn = None, fun_type = None):
         Expr.__init__(self)
         self.fqn = fqn
-        if type(expr) in (str, unicode): expr = Var(expr)
+        if type(expr) is str: expr = Var(expr)
         self.expr = expr
-        if type(params) in (str, unicode): params = [params]
+        if type(params) is str: params = [params]
         self.params = params
         self.return_param = None
         self.fun_type = fun_type
@@ -199,7 +198,7 @@ class Abs(Expr):
 
     def apply(self, args):
         assert self.expr is not None
-        args = [Var(a) if type(a) in (str, unicode) else a for a in args]
+        args = [Var(a) if type(a) is str else a for a in args]
 
         # Calculate all free vars in the arguments
         arg_free_vars = set()
@@ -304,7 +303,7 @@ class Abs(Expr):
         return self.temp_variables[str(varname)]
 
     def register_temp_var(self, varname, vartype):
-        assert type(varname) in (str, unicode)
+        assert type(varname) is str
         if varname in self.params:
             raise TCException("Duplicate temporary variable '%s'.  Same as function arguments." % varname)
         elif varname == self.return_param:
@@ -363,12 +362,12 @@ class App(Expr):
     """ Base of all application expressions. """
     def __init__(self, expr, *args):
         Expr.__init__(self)
-        if type(expr) in (str, unicode): expr = Var(expr)
+        if type(expr) is str: expr = Var(expr)
         self.expr = expr
-        if not all([(type(arg) in (str, unicode) or isinstance(arg, Expr)) for arg in args]):
+        if not all([(type(arg) is str or isinstance(arg, Expr)) for arg in args]):
             set_trace()
-            assert(all([(type(arg) in (str, unicode) or isinstance(arg, Expr)) for arg in args]))
-        self.args = [Var(arg) if type(arg) in (str, unicode) else arg for arg in args]
+            assert(all([(type(arg) is str or isinstance(arg, Expr)) for arg in args]))
+        self.args = [Var(arg) if type(arg) is str else arg for arg in args]
 
     def __repr__(self):
         return "<0x%x - %s - %s (%s)>" % (id(self), self.__class__.__name__, repr(self.expr), repr(self.args))
@@ -409,14 +408,15 @@ class TypeApp(Type, App):
     passed as arguments.
     """
     def __init__(self, expr, *args):
-        if type(expr) in (str, unicode):
+        if type(expr) is str:
             expr = make_type_var(expr)
         App.__init__(self, expr, *args)
         Type.__init__(self, None)
         assert(all(t.isany(Type) or t.isa(Var) for t in args)), "All type args in a TypeApp must be Type sub classes or Vars"
 
 class AtomicType(Type):
-    def __init__(self):
+    def __init__(self, fqn):
+        Type.__init__(self, fqn)
         self.inferred_type = KindType
 
     def substitute(self, bindings):
@@ -518,7 +518,7 @@ def make_enum_type(fqn, symbols):
         ta.expr = out
     return out
 
-KindType = Type()
+KindType = Type("")
 AnyType = make_atomic_type("any")
 VoidType = make_atomic_type("void")
 
