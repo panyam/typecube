@@ -1,54 +1,68 @@
 
 class Type(object):
-    def __init__(self, param_names = None):
-        self.param_names = param_names or []
-        self.validator = self.default_validator
+    def __init__(self, name, args = None):
+        self.name = name
+        self.args = args or []
+        self.validator = None
         self.docs = ""
-        self.label = ""
 
-    def set_label(self, label):
-        self.label = label
+    def set_name(self, name):
+        self.name = name
         return self
 
     def set_docs(self, docs):
         self.docs = docs
         return self
 
+    def __repr__(self):
+        out = "<%s(0x%x)" % (self.__class__.__name__, id(self))
+        if self.name:
+            out += ": " + self.name
+        if self.args:
+            out += " [%s]" % ", ".join(self.args)
+        out += ">"
+        return out
+
     def set_validator(self, validator):
         self.validator = validator
         return self
 
     def __getitem__(self, type_vals):
-        if type(type_vals) is not list:
+        if type(type_vals) is tuple:
+            type_vals = list(iter(type_vals))
+        elif type(type_vals) is not list:
             type_vals = [type_vals]
-        param_values = dict(zip(self.param_names, type_vals))
+        param_values = dict(zip(self.args, type_vals))
         return self.apply(**param_values)
 
     def apply(self, **param_values):
         return TypeApp(self, **param_values)
 
-    @classmethod
-    def default_validator(cls, data, thetype):
-        assert False, "Default validator not implemented"
+class TypeVar(Type):
+    """ A type variable.  """
+    def __init__(self, name, args = None):
+        Type.__init__(self, name, args)
 
 class TypeApp(Type):
+    """ Type applications allow generics to be concretized. """
     def __init__(self, target_type, **param_values):
-        self.param_values = {}
+        Type.__init__(self, target_type.name)
+        self.param_values = param_values
         self.root_type = target_type
         if isinstance(target_type, TypeApp):
             self.root_type = target_type.root_type
             self.param_values.update(target_type.param_values)
             # now only update *new* values that have not been duplicated
             for k,v in param_values.iteritems():
-                if k in target_type.param_names:
+                if k in target_type.args:
                     self.param_values[k] = v
 
-class TypeVar(Type):
-    """ A type variable. """
-    resolved_type = None
-
 class NativeType(Type):
-    """ A native type whose details are not known but cannot be inspected further - like a leaf type. """
+    """ A native type whose details are not known but cannot be 
+    inspected further - like a leaf type. 
+
+    eg Array<T>, Map<K,V> etc
+    """
     pass
 
 class Field(object):
@@ -63,8 +77,8 @@ class ContainerType(Type):
         Product types (Records, Tuples, Named tuples etc) and 
         Sum types (Eg Unions, Enums (Tagged Unions), Algebraic Data Types.
     """
-    def __init__(self, param_names = None):
-        Type.__init__(self, param_names)
+    def __init__(self, name, args = None):
+        Type.__init__(self, name, args)
         self.children = []
 
     def add_children(self, *fields):
@@ -78,27 +92,11 @@ class ContainerType(Type):
         self.children.append(field)
         return self
 
-class TaggedType(ContainerType):
-    """ A tagged type is a type constructor that can have 0 or more (unnamed) parameters.
-    This is very much like a record type but the children are unnamed.
-    This is also like a tuple type but unlike a tuple type this type has 
-    a "first class" name.
-    """
-    def __init__(self, param_names = None, children = None):
-        ContainerType.__init__(self, param_names)
-        self.add_children(children)
+class RecordType(ContainerType): pass
 
-class RecordType(ContainerType):
-    def __init__(self, param_names = None):
-        ContainerType.__init__(self, param_names)
+class TupleType(ContainerType): pass
 
-class TupleType(ContainerType):
-    def __init__(self, param_names = None):
-        ContainerType.__init__(self, param_names)
-
-class UnionType(ContainerType):
-    def __init__(self, param_names = None):
-        ContainerType.__init__(self, param_names)
+class UnionType(ContainerType): pass
 
 class FunctionType(Type):
     input_types = None
