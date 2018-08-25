@@ -1,6 +1,7 @@
 
 # Type checkers for data given types
 from typecube import core
+from typecube import errors
 
 class Bindings(object):
     class Entry(object):
@@ -21,8 +22,8 @@ class Bindings(object):
 
     def __setitem__(self, key, value):
         entry = self.entries.get(key, None)
-        if entry is not None:
-            assert entry.level < self.level, "Value for '%s' already exists in this level (%d)" % (key, self.level)
+        if entry is not None and entry.level > self.level:
+            raise errors.ValidationError("Value for '%s' already exists in this level (%d)" % (key, self.level))
         self.entries[key] = Bindings.Entry(value, self.level, entry)
 
     def __getitem__(self, key):
@@ -64,9 +65,28 @@ def type_check(thetype, data, bindings = None):
         bindings.pop()
     elif isinstance(thetype, core.TypeVar):
         # Find the binding for this type variable
-        type_check(bindings[thetype.name], data, bindings)
+        bound_type = bindings[thetype.name]
+        if bound_type is None:
+            raise errors.ValidationError("TypeVar(%s) is not bound to a type." % thetype.name)
+        type_check(bound_type, data, bindings)
+    elif isinstance(thetype, core.NativeType):
+        # Native types are interesting - these can be plain types such as Int, Float etc
+        # or they can be generic types like Array<T>, Map<K,V>
+        # While plain types are fine, generic types (ie native types with args) pose a problem.
+        # How do we perform type checking on "contents" of the data given native types.
+        # We need native types to be able to apply mapper functions on data as they see fit.
+        # So to deal with custom validations on native types we need
+        # native types to expose mapper functors for us!!!
+        if thetype.args and thetype.mapper_functor:
+            def type_check_functor(*values):
+                for arg, value in zip(thetype.args, values):
+                    bound_type = bindings[arg]
+                    if bound_type is None:
+                        raise errors.ValidationError("Arg(%s) is not bound to a type." % arg)
+                    type_check(bound_type, value)
+            thetype.mapper_functor(type_check_functor, data)
 
     # Finally apply any other validators that were nominated 
     # specifically for that particular type
     if thetype.validator:
-        thetype.validator(thetype, data)
+        thetype.validator(thetype, data, bindings)

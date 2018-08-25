@@ -29,9 +29,38 @@ def test_tuple_creation():
                 .add(defaults.String)
     checkers.type_check(MyTuple, (1, 2.4, "Hello"))
 
+def test_array_checking():
+    at = defaults.Array[defaults.Int]
+    checkers.type_check(at, [1,2,3,4,5])
+    try:
+        checkers.type_check(at, [1,2,3,4,5.0])
+        assert False
+    except errors.ValidationError as ve:
+        pass
+
+def test_dict_checking():
+    dt = defaults.Map[defaults.String, defaults.Int]
+    checkers.type_check(dt, dict(a = 1, b = 2, c = 3))
+    try:
+        checkers.type_check(dt, dict(a = 1, b = 2, c = 3.0))
+        assert False
+    except errors.ValidationError as ve:
+        pass
+
 def test_typeapp_creation():
     # Pair<F,S> { first : F, second : S}
     Pair = RecordType("Pair", ["F", "S"])       \
                     .add(TypeVar("F"), "first") \
                     .add(TypeVar("S"), "second")
     checkers.type_check(Pair[defaults.Int, defaults.String], {'first': 1, 'second': '2'})
+
+def test_typeapp_with_unbound_type():
+    # Pair<F,S> { first : F, second : S}
+    Pair = RecordType("Pair", ["F", "S"])       \
+                    .add(TypeVar("F"), "first") \
+                    .add(TypeVar("S"), "second")
+    try:
+        checkers.type_check(Pair, {'first': 1, 'second': '2'})
+        assert False
+    except errors.ValidationError as ve: pass
+

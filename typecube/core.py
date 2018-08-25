@@ -65,7 +65,9 @@ class NativeType(Type):
 
     eg Array<T>, Map<K,V> etc
     """
-    pass
+    def __init__(self, name, args = None):
+        Type.__init__(self, name, args)
+        self.mapper_functor = None
 
 class ContainerType(Type):
     """ Non leaf types.  These include:
