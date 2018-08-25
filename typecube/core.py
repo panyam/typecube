@@ -1,17 +1,19 @@
 
+class Namespace(object):
+    def __init__(self, name, parent = None):
+        self.name = name
+        self.parent = parent
+        self.children = {}
+        self.types = {}
+
 class Type(object):
     def __init__(self, name, args = None):
         self.name = name
         self.args = args or []
         self.validator = None
-        self.docs = ""
 
     def set_name(self, name):
         self.name = name
-        return self
-
-    def set_docs(self, docs):
-        self.docs = docs
         return self
 
     def __repr__(self):
@@ -65,12 +67,6 @@ class NativeType(Type):
     """
     pass
 
-class Field(object):
-    """ Each child type in a container type is captured in a TypeField. """
-    def __init__(self, field_type, name = None):
-        self.field_type = field_type
-        self.name = name
-
 class ContainerType(Type):
     """ Non leaf types.  These include:
 
@@ -79,17 +75,14 @@ class ContainerType(Type):
     """
     def __init__(self, name, args = None):
         Type.__init__(self, name, args)
-        self.children = []
+        self.child_types = []
+        self.child_names = []
 
-    def add_children(self, *fields):
-        for f in fields:
-            self.add_child(f)
-        return self
-
-    def add_child(self, field):
-        if field.name and field.name in [c.name for c in self.children if c.name]:
-            assert False, "Child type with name '%s' already exists" % field.name
-        self.children.append(field)
+    def add(self, child_type, child_name = None):
+        if child_name and child_name in self.child_names:
+            assert False, "Child type with name '%s' already exists" % child_name
+        self.child_types.append(child_type)
+        self.child_names.append(child_name)
         return self
 
 class RecordType(ContainerType): pass

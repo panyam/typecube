@@ -41,19 +41,20 @@ def type_check(thetype, data, bindings = None):
     """ Checks that a given bit of data conforms to the type provided  """
     if not bindings: bindings = Bindings()
     if isinstance(thetype, core.RecordType):
-        for child in thetype.children:
-            value = data[child.name]
-            type_check(child.field_type, value, bindings)
+        for name,child in zip(thetype.child_names, thetype.child_types):
+            value = data[name]
+            type_check(child, value, bindings)
     elif isinstance(thetype, core.TupleType):
         assert isinstance(data, tuple)
-        assert len(data) == len(thetype.children)
-        for value,child in zip(data, thetype.children):
-            type_check(child.field_type, value, bindings)
+        assert len(data) == len(thetype.child_types)
+        for value,child_type in zip(data, thetype.child_types):
+            type_check(child_type, value, bindings)
     elif isinstance(thetype, core.UnionType):
         assert isinstance(thetype, dict)
-        fields = [child for child in thetype.children if child.name in data]
+        children = [(name,child) for name,child in zip(thetype.child_names, thetype.child_types) if name in data]
         assert len(fields) == 1, "0 or more than 1 entry in Union"
-        type_check(fields[0].field_type, data[fields[0].name], bindings)
+        child_name,child_type = children[0]
+        type_check(child_type, data[child_name], bindings)
     elif isinstance(thetype, core.TypeApp):
         # Type applications are tricky.  These will "affect" bindings
         bindings.push()

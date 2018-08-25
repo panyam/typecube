@@ -17,21 +17,21 @@ def test_basic_validation():
     except errors.ValidationError as ve: pass
 
 def test_record_creation():
-    Pair = RecordType("Pair").add_children(
-            Field(defaults.Int, "first"),
-            Field(defaults.String, "second"))
+    Pair = RecordType("Pair")                   \
+                .add(defaults.Int, "first")     \
+                .add(defaults.String, "second")
     checkers.type_check(Pair, {'first': 1, 'second': '2'})
 
 def test_tuple_creation():
-    MyTuple = TupleType("MyTuple").add_children(
-            Field(defaults.Int),
-            Field(defaults.Float),
-            Field(defaults.String))
+    MyTuple = TupleType("MyTuple")              \
+                .add(defaults.Int)              \
+                .add(defaults.Float)            \
+                .add(defaults.String)
     checkers.type_check(MyTuple, (1, 2.4, "Hello"))
 
 def test_typeapp_creation():
     # Pair<F,S> { first : F, second : S}
-    Pair = RecordType("Pair", ["F", "S"]).add_children(
-            Field(TypeVar("F"), "first"),
-            Field(TypeVar("S"), "second"))
+    Pair = RecordType("Pair", ["F", "S"])       \
+                    .add(TypeVar("F"), "first") \
+                    .add(TypeVar("S"), "second")
     checkers.type_check(Pair[defaults.Int, defaults.String], {'first': 1, 'second': '2'})
