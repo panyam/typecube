@@ -43,6 +43,7 @@ class Type(object):
 class TypeVar(Type):
     """ A type variable.  """
     def __init__(self, name, args = None):
+        assert name is not None and name.strip(), "Type vars MUST have names"
         Type.__init__(self, name, args)
 
 class TypeApp(Type):

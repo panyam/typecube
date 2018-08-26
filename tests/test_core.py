@@ -64,3 +64,12 @@ def test_typeapp_with_unbound_type():
         assert False
     except errors.ValidationError as ve: pass
 
+def test_record_to_object():
+    """ Here we want to create "native" classes out of Types so we can do something
+    useful with instances of these types.
+
+    Some examples are taking a type and use an instance of it in a function, 
+    serialize it to some representation, deserialize some representation to
+    an instance of the type.
+    """
+    pass
