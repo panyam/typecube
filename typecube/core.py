@@ -76,25 +76,45 @@ class ContainerType(Type):
         Product types (Records, Tuples, Named tuples etc) and 
         Sum types (Eg Unions, Enums (Tagged Unions), Algebraic Data Types.
     """
+    def name_exists(self, name):
+        pass
+
+    def add(self, child_type, child_name = None):
+        if child_name and self.name_exists(child_name):
+            assert False, "Type '%s' already taken" % child_name
+        self._add_type(child_type, child_name)
+        return self
+
+class FunctionType(ContainerType):
     def __init__(self, name, args = None):
         Type.__init__(self, name, args)
+        self.input_types = []
+        self.input_names = []
+        self.output_type = None
+        self.output_name = None
+
+    def name_exists(self, name):
+        return name == self.output_name or name in self.input_names
+
+    def _add_type(self, input_type, input_name):
+        self.input_types.append(input_type)
+        self.input_names.append(input_name)
+
+class DataType(ContainerType):
+    def __init__(self, name, args = None):
+        ContainerType.__init__(self, name, args)
         self.child_types = []
         self.child_names = []
 
-    def add(self, child_type, child_name = None):
-        if child_name and child_name in self.child_names:
-            assert False, "Child type with name '%s' already exists" % child_name
+    def name_exists(self, name):
+        return name in self.child_names
+
+    def _add_type(self, child_type, child_name):
         self.child_types.append(child_type)
         self.child_names.append(child_name)
-        return self
 
-class RecordType(ContainerType): pass
+class RecordType(DataType): pass
 
-class TupleType(ContainerType): pass
+class TupleType(DataType): pass
 
-class UnionType(ContainerType): pass
-
-class FunctionType(Type):
-    input_types = None
-    return_type = None
-
+class UnionType(DataType): pass
